@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\OdooConnection;
+use App\Services\OdooConnectionVerifier;
 use Flux\Flux;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
@@ -82,12 +83,72 @@ new #[Title('Odoo connection')] class extends Component {
         unset($this->hasApiKey);
 
         Flux::toast(variant: 'success', text: __('Odoo connection saved.'));
+
+        $this->recordVerification($connection);
+    }
+
+    /**
+     * Check the saved Odoo connection.
+     */
+    public function testConnection(): void
+    {
+        $this->authorizeAccess();
+
+        $connection = OdooConnection::current();
+
+        if ($connection === null) {
+            Flux::toast(variant: 'danger', text: __('Save the connection before testing it.'));
+
+            return;
+        }
+
+        $this->recordVerification($connection);
     }
 
     #[Computed]
     public function hasApiKey(): bool
     {
         return filled(OdooConnection::current()?->api_key);
+    }
+
+    /**
+     * @return array{verified: bool, error: string|null, checkedAt: string|null}|null
+     */
+    #[Computed]
+    public function connectionStatus(): ?array
+    {
+        $connection = OdooConnection::current();
+
+        if ($connection === null) {
+            return null;
+        }
+
+        return [
+            'verified' => $connection->verified_at !== null,
+            'error' => $connection->verification_error,
+            'checkedAt' => $connection->verified_at === null
+                ? null
+                : __('Last checked :time.', ['time' => $connection->verified_at->timezone(config('app.timezone'))->format('j M Y H:i')]),
+        ];
+    }
+
+    /**
+     * Store the result of an Odoo authentication check.
+     */
+    protected function recordVerification(OdooConnection $connection): void
+    {
+        $result = (new OdooConnectionVerifier)->verify($connection);
+
+        $connection->verified_at = $result->connected ? now() : null;
+        $connection->verification_error = $result->connected ? null : $result->message;
+        $connection->save();
+
+        unset($this->connectionStatus);
+
+        Flux::toast(
+            variant: $result->connected ? 'success' : 'danger',
+            text: $result->message,
+        );
     }
 
     /**
@@ -149,8 +210,20 @@ new #[Title('Odoo connection')] class extends Component {
                     : __('Create a key in Odoo under Preferences, then Account Security.')"
             />
 
-            <div class="flex items-center justify-end">
-                <flux:button variant="primary" type="submit" class="w-full" data-test="save-odoo-connection-button">
+            @if ($this->connectionStatus['verified'] ?? false)
+                <flux:callout variant="success" icon="check-circle" :heading="__('Connected')" :text="$this->connectionStatus['checkedAt']" />
+            @elseif (filled($this->connectionStatus['error'] ?? null))
+                <flux:callout variant="danger" icon="x-circle" :heading="__('Connection failed')" :text="$this->connectionStatus['error']" />
+            @elseif ($this->connectionStatus !== null)
+                <flux:callout variant="warning" icon="exclamation-circle" :heading="__('Not checked')" :text="__('This connection has not been verified.')" />
+            @endif
+
+            <div class="flex items-center justify-end gap-3">
+                <flux:button type="button" wire:click="testConnection" data-test="test-odoo-connection-button">
+                    {{ __('Test connection') }}
+                </flux:button>
+
+                <flux:button variant="primary" type="submit" data-test="save-odoo-connection-button">
                     {{ __('Save') }}
                 </flux:button>
             </div>

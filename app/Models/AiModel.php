@@ -14,6 +14,8 @@ use Illuminate\Support\Carbon;
  * @property string $model
  * @property string|null $organization
  * @property string $api_key
+ * @property Carbon|null $verified_at
+ * @property string|null $verification_error
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -41,6 +43,7 @@ class AiModel extends Model
     {
         return [
             'api_key' => 'encrypted',
+            'verified_at' => 'datetime',
         ];
     }
 }

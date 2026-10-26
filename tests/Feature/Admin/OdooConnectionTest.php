@@ -2,7 +2,13 @@
 
 use App\Models\OdooConnection;
 use App\Models\User;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
+
+beforeEach(function () {
+    Http::preventStrayRequests();
+});
 
 test('admins are allowed through the admin gate', function () {
     $user = User::factory()->admin()->create();
@@ -93,6 +99,8 @@ test('odoo connection requires a url, database, username, and api key', function
             'apiKey' => 'The API key field is required.',
         ]);
 
+    Http::assertNothingSent();
+
     $this->assertDatabaseEmpty('odoo_connections');
 });
 
@@ -129,7 +137,16 @@ test('odoo connection rejects a username longer than 255 characters', function (
 });
 
 test('admins can save the odoo connection', function () {
+    $this->travelTo('2026-10-26 12:00:00');
     $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://acme.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => 2,
+        ]),
+    ]);
 
     Livewire::test('pages::admin.odoo-connection')
         ->set('url', 'https://acme.odoo.com/')
@@ -138,7 +155,8 @@ test('admins can save the odoo connection', function () {
         ->set('apiKey', 'odoo-api-key')
         ->call('save')
         ->assertHasNoErrors()
-        ->assertSet('apiKey', '');
+        ->assertSet('apiKey', '')
+        ->assertSee('Connected');
 
     $this->assertDatabaseHas('odoo_connections', [
         'url' => 'https://acme.odoo.com',
@@ -146,7 +164,19 @@ test('admins can save the odoo connection', function () {
         'username' => 'admin',
     ]);
 
-    expect(OdooConnection::query()->sole()->api_key)->toBe('odoo-api-key');
+    $connection = OdooConnection::query()->sole();
+
+    expect($connection->api_key)->toBe('odoo-api-key')
+        ->and($connection->verified_at?->toDateTimeString())->toBe('2026-10-26 12:00:00')
+        ->and($connection->verification_error)->toBeNull();
+
+    Http::assertSent(function (Request $request) {
+        return $request->url() === 'https://acme.odoo.com/jsonrpc'
+            && $request->data()['params']['method'] === 'authenticate'
+            && $request->data()['params']['args'][0] === 'acme'
+            && $request->data()['params']['args'][1] === 'admin'
+            && $request->data()['params']['args'][2] === 'odoo-api-key';
+    });
 
     $this->assertDatabaseMissing('odoo_connections', [
         'api_key' => 'odoo-api-key',
@@ -155,6 +185,14 @@ test('admins can save the odoo connection', function () {
 
 test('saving a blank api key keeps the saved key', function () {
     $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://example.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => 2,
+        ]),
+    ]);
 
     OdooConnection::factory()->create([
         'api_key' => 'original-key',
@@ -175,6 +213,14 @@ test('saving a blank api key keeps the saved key', function () {
 
 test('saving a new api key replaces the saved key', function () {
     $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://example.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => 2,
+        ]),
+    ]);
 
     OdooConnection::factory()->create([
         'api_key' => 'original-key',
@@ -215,4 +261,129 @@ test('odoo connection details are escaped on the page', function () {
         ->assertOk()
         ->assertDontSee('<script>alert(1)</script>', false)
         ->assertSee('&lt;script&gt;alert(1)&lt;\/script&gt;', false);
+});
+
+test('saving reports a rejected odoo connection', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://acme.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => false,
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->set('url', 'https://acme.odoo.com')
+        ->set('database', 'acme')
+        ->set('username', 'admin')
+        ->set('apiKey', 'odoo-api-key')
+        ->call('save')
+        ->assertSee('Connection failed')
+        ->assertSee('Odoo rejected these connection details.');
+
+    $connection = OdooConnection::query()->sole();
+
+    expect($connection->api_key)->toBe('odoo-api-key')
+        ->and($connection->verified_at)->toBeNull()
+        ->and($connection->verification_error)->toBe('Odoo rejected these connection details.');
+});
+
+test('saving reports when the odoo server cannot be reached', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://acme.odoo.com/jsonrpc' => Http::failedConnection(),
+    ]);
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->set('url', 'https://acme.odoo.com')
+        ->set('database', 'acme')
+        ->set('username', 'admin')
+        ->set('apiKey', 'odoo-api-key')
+        ->call('save')
+        ->assertSee('Could not reach the Odoo server.');
+
+    expect(OdooConnection::query()->sole()->verified_at)->toBeNull();
+});
+
+test('odoo verification does not follow redirects', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Http::fake([
+        'https://acme.odoo.com/jsonrpc' => Http::response('', 302, [
+            'Location' => 'https://evil.example/steal',
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->set('url', 'https://acme.odoo.com')
+        ->set('database', 'acme')
+        ->set('username', 'admin')
+        ->set('apiKey', 'odoo-api-key')
+        ->call('save')
+        ->assertSee('Could not reach the Odoo server.');
+
+    Http::assertSentCount(1);
+
+    expect(OdooConnection::query()->sole()->verification_error)->not->toContain('odoo-api-key');
+});
+
+test('admins can recheck a saved odoo connection', function () {
+    $this->travelTo('2026-10-26 12:00:00');
+    $this->actingAs(User::factory()->admin()->create());
+
+    OdooConnection::factory()->create([
+        'url' => 'https://acme.odoo.com',
+        'verification_error' => 'Odoo rejected these connection details.',
+    ]);
+
+    Http::fake([
+        'https://acme.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => 2,
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->call('testConnection')
+        ->assertSee('Connected');
+
+    $connection = OdooConnection::query()->sole();
+
+    expect($connection->verified_at?->toDateTimeString())->toBe('2026-10-26 12:00:00')
+        ->and($connection->verification_error)->toBeNull();
+});
+
+test('testing an unsaved odoo connection does not call odoo', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->call('testConnection');
+
+    Http::assertNothingSent();
+
+    $this->assertDatabaseEmpty('odoo_connections');
+});
+
+test('non-admins cannot test the odoo connection', function () {
+    $user = User::factory()->admin()->create();
+
+    $this->actingAs($user);
+
+    OdooConnection::factory()->create();
+
+    $component = Livewire::test('pages::admin.odoo-connection');
+
+    $user->is_admin = false;
+    $user->save();
+
+    auth()->setUser($user->fresh());
+
+    $component->call('testConnection')
+        ->assertForbidden();
+
+    Http::assertNothingSent();
 });

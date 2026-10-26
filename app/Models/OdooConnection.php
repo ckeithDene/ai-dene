@@ -15,6 +15,8 @@ use Illuminate\Support\Carbon;
  * @property string $database
  * @property string $username
  * @property string $api_key
+ * @property Carbon|null $verified_at
+ * @property string|null $verification_error
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -42,6 +44,7 @@ class OdooConnection extends Model
     {
         return [
             'api_key' => 'encrypted',
+            'verified_at' => 'datetime',
         ];
     }
 }
