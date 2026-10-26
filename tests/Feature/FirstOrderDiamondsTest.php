@@ -71,6 +71,25 @@ test('the first order page escapes company details', function () {
         ->assertSee('&lt;script&gt;alert(2)&lt;/script&gt;', false);
 });
 
+test('first order diamonds are shown 15 at a time', function () {
+    $this->actingAs(User::factory()->create());
+
+    FirstOrderDiamond::factory()
+        ->count(16)
+        ->sequence(fn ($sequence) => [
+            'company_name' => 'Company '.$sequence->index,
+            'ordered_at' => now()->subMinutes($sequence->index),
+        ])
+        ->create();
+
+    Livewire::test('pages::first-order-diamonds')
+        ->assertSee('Company 0')
+        ->assertDontSee('Company 15')
+        ->call('gotoPage', 2)
+        ->assertSee('Company 15')
+        ->assertDontSee('Company 0');
+});
+
 test('the page explains when no first orders have been reviewed', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('first-order-diamonds'))
@@ -492,6 +511,116 @@ test('a company that ordered before 1 October 2026 is not a first order', functi
     expect(FirstOrderDiamond::query()->count())->toBe(0);
 
     Http::assertNotSent(fn (Request $request) => $request->url() === 'https://api.openai.com/v1/responses');
+});
+
+test('a reviewed company gets a logo from its website', function () {
+    Storage::fake('public');
+    OdooConnection::factory()->create();
+    AiModel::factory()->create();
+
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+
+    $diamond = FirstOrderDiamond::factory()->create([
+        'company_name' => 'Acme Ltd',
+        'website' => 'https://example.com',
+        'logo_path' => null,
+        'is_registered_company' => true,
+        'status' => FirstOrderDiamondStatus::Complete,
+    ]);
+
+    Http::fake(function (Request $request) use ($png) {
+        $params = $request->data()['params'] ?? [];
+
+        if (($params['method'] ?? null) === 'authenticate') {
+            return Http::response(['result' => 7]);
+        }
+
+        if (($params['args'][3] ?? null) === 'sale.order') {
+            return Http::response(firstOrderSaleOrders($params['args'], []));
+        }
+
+        if ($request->url() === 'https://example.com/logo.png') {
+            return Http::response($png, 200, ['Content-Type' => 'image/png']);
+        }
+
+        if (str_starts_with($request->url(), 'https://example.com')) {
+            return Http::response(
+                '<html><head><link rel="apple-touch-icon" href="/logo.png"></head></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            );
+        }
+
+        return Http::response('not-an-image', 404);
+    });
+
+    $result = app(ReviewFirstOrderDiamonds::class)->handle();
+
+    expect($result->reviewed)->toBe(0)
+        ->and($diamond->fresh()->logo_path)->toBe('first-order-diamonds/'.$diamond->odoo_partner_id.'.png');
+
+    Http::assertNotSent(fn (Request $request) => $request->url() === 'https://api.openai.com/v1/responses');
+});
+
+test('a logo link is not followed to a private address', function () {
+    Storage::fake('public');
+    OdooConnection::factory()->create();
+    AiModel::factory()->create();
+
+    FirstOrderDiamond::factory()->create([
+        'website' => 'https://example.com',
+        'logo_path' => null,
+        'is_registered_company' => true,
+        'status' => FirstOrderDiamondStatus::Complete,
+    ]);
+
+    Http::fake(function (Request $request) {
+        if (str_contains($request->url(), '127.0.0.1')) {
+            return Http::response('private', 200);
+        }
+
+        $params = $request->data()['params'] ?? [];
+
+        if (($params['method'] ?? null) === 'authenticate') {
+            return Http::response(['result' => 7]);
+        }
+
+        if (($params['args'][3] ?? null) === 'sale.order') {
+            return Http::response(firstOrderSaleOrders($params['args'], []));
+        }
+
+        if (str_starts_with($request->url(), 'https://example.com')) {
+            return Http::response('', 302, ['Location' => 'https://127.0.0.1/logo.png']);
+        }
+
+        return Http::response('not-an-image', 404);
+    });
+
+    app(ReviewFirstOrderDiamonds::class)->handle();
+
+    expect(FirstOrderDiamond::query()->sole()->logo_path)->toBeNull();
+
+    Http::assertNotSent(fn (Request $request) => str_contains($request->url(), '127.0.0.1'));
+});
+
+test('signed in users can open a stored company logo', function () {
+    Storage::fake('public');
+
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    $diamond = FirstOrderDiamond::factory()->create([
+        'odoo_partner_id' => 5,
+        'logo_path' => 'first-order-diamonds/5.png',
+    ]);
+
+    Storage::disk('public')->put($diamond->logo_path, $png);
+
+    $this->get(route('first-order-diamonds.logo', $diamond))
+        ->assertRedirect(route('login'));
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('first-order-diamonds.logo', $diamond))
+        ->assertOk()
+        ->assertHeader('content-type', 'image/png');
 });
 
 test('a private logo url is not downloaded', function () {

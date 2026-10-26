@@ -72,7 +72,7 @@ class CompanyResearcher
         Reply with JSON only, no markdown, using these keys:
         is_registered_company, overview, company_size, estimated_value, market_share, logo_url, website.
         is_registered_company is true only when web search finds evidence this is a registered company, such as a company registration, an official website, or a reliable business listing. Use false for a private individual, a trading name with no company evidence, or when nothing reliable is found.
-        logo_url must be a direct https URL of the company logo image, or null.
+        logo_url must be a direct https URL of the company logo image file, such as a png, jpg, or webp, or null. Do not use a web page address.
         website must be the company's public website, or null.
         Use "Unknown" when a fact cannot be found.
 

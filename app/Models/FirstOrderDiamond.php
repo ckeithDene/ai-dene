@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * @property int $id
@@ -61,11 +60,21 @@ class FirstOrderDiamond extends Model
      */
     public function logoUrl(): ?string
     {
-        if ($this->logo_path === null) {
+        if ($this->logo_path === null || preg_match('/^first-order-diamonds\/\d+\.(png|jpe?g|gif|webp|ico)$/', $this->logo_path) !== 1) {
             return null;
         }
 
-        return Storage::disk('public')->url($this->logo_path);
+        return route('first-order-diamonds.logo', $this);
+    }
+
+    /**
+     * Get a short label when no logo image is available.
+     */
+    public function logoInitial(): string
+    {
+        $letter = mb_substr(trim($this->company_name), 0, 1);
+
+        return mb_strtoupper($letter !== '' ? $letter : '?');
     }
 
     /**

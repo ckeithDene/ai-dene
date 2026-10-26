@@ -41,9 +41,14 @@ class ReviewFirstOrderDiamonds
             return new DiamondCheckResult(0, __('Could not read first orders from Odoo.'));
         }
 
+        $checkedPartners = [];
+
         foreach ($leads as $lead) {
+            $checkedPartners[] = $lead->partnerId;
             $this->review($lead, $aiModel);
         }
+
+        $this->fillMissingLogos($checkedPartners);
 
         return new DiamondCheckResult(count($leads), null);
     }
@@ -91,14 +96,15 @@ class ReviewFirstOrderDiamonds
                 return;
             }
 
-            $logoPath = (new CompanyLogoStore)->store($lead->partnerId, $lead->logoContents, $brief->logoUrl);
+            $website = $diamond->website ?? $brief->website;
+            $logoPath = (new CompanyLogoStore)->store($lead->partnerId, $lead->logoContents, $brief->logoUrl, $website);
 
             $diamond->fill([
                 'overview' => $brief->overview,
                 'company_size' => $brief->companySize,
                 'estimated_value' => $brief->estimatedValue,
                 'market_share' => $brief->marketShare,
-                'website' => $diamond->website ?? $brief->website,
+                'website' => $website,
                 'logo_path' => $logoPath ?? $diamond->logo_path,
                 'is_registered_company' => true,
                 'status' => FirstOrderDiamondStatus::Complete,
@@ -114,5 +120,33 @@ class ReviewFirstOrderDiamonds
             ]);
             $diamond->save();
         }
+    }
+
+    /**
+     * Find logos for companies that were reviewed before an image could be saved.
+     *
+     * @param  array<int, int>  $checkedPartners
+     */
+    private function fillMissingLogos(array $checkedPartners): void
+    {
+        FirstOrderDiamond::query()
+            ->where('status', FirstOrderDiamondStatus::Complete)
+            ->where('is_registered_company', true)
+            ->whereNull('logo_path')
+            ->whereNotNull('website')
+            ->when($checkedPartners !== [], fn ($query) => $query->whereNotIn('odoo_partner_id', $checkedPartners))
+            ->orderBy('id')
+            ->limit(20)
+            ->get()
+            ->each(function (FirstOrderDiamond $diamond): void {
+                $logoPath = (new CompanyLogoStore)->store($diamond->odoo_partner_id, null, null, $diamond->website);
+
+                if ($logoPath === null) {
+                    return;
+                }
+
+                $diamond->logo_path = $logoPath;
+                $diamond->save();
+            });
     }
 }

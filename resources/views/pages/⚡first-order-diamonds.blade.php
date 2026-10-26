@@ -4,13 +4,16 @@ use App\Actions\ReviewFirstOrderDiamonds;
 use App\Enums\FirstOrderDiamondStatus;
 use App\Models\FirstOrderDiamond;
 use Flux\Flux;
-use Illuminate\Support\Collection;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 new #[Title('First Order Diamonds')] class extends Component {
+    use WithPagination;
+
     /**
      * Review new confirmed first orders now.
      */
@@ -20,6 +23,7 @@ new #[Title('First Order Diamonds')] class extends Component {
 
         $result = app(ReviewFirstOrderDiamonds::class)->handle();
 
+        $this->resetPage();
         unset($this->diamonds);
 
         if ($result->skippedReason !== null) {
@@ -36,17 +40,16 @@ new #[Title('First Order Diamonds')] class extends Component {
     }
 
     /**
-     * @return Collection<int, FirstOrderDiamond>
+     * @return LengthAwarePaginator<int, FirstOrderDiamond>
      */
     #[Computed]
-    public function diamonds(): Collection
+    public function diamonds(): LengthAwarePaginator
     {
         return FirstOrderDiamond::query()
             ->where('is_registered_company', true)
             ->latest('ordered_at')
             ->latest('id')
-            ->limit(48)
-            ->get();
+            ->paginate(15);
     }
 }; ?>
 
@@ -75,11 +78,15 @@ new #[Title('First Order Diamonds')] class extends Component {
                             <img
                                 src="{{ $diamond->logoUrl() }}"
                                 alt="{{ $diamond->company_name }}"
-                                class="size-16 shrink-0 rounded-lg bg-white object-contain"
+                                class="size-16 shrink-0 rounded-lg border border-zinc-200 bg-white object-contain dark:border-zinc-600"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'"
                             />
+                            <div class="hidden size-16 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-lg font-semibold text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100">
+                                {{ $diamond->logoInitial() }}
+                            </div>
                         @else
-                            <div class="flex size-16 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-700">
-                                <flux:icon icon="building-office-2" class="size-8 text-zinc-500" />
+                            <div class="flex size-16 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-lg font-semibold text-zinc-700 dark:bg-zinc-700 dark:text-zinc-100">
+                                {{ $diamond->logoInitial() }}
                             </div>
                         @endif
 
@@ -165,5 +172,7 @@ new #[Title('First Order Diamonds')] class extends Component {
                 </flux:card>
             @endforeach
         </div>
+
+        <flux:pagination :paginator="$this->diamonds" />
     @endif
 </div>
