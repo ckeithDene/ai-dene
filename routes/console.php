@@ -14,3 +14,8 @@ Schedule::command('first-order-diamonds:check')
     ->hourly()
     ->withoutOverlapping(180)
     ->runInBackground();
+
+Schedule::command('biggest-fish:check')
+    ->hourly()
+    ->withoutOverlapping(180)
+    ->runInBackground();

@@ -56,6 +56,7 @@ class CompanyResearcher
             overview: $this->text($decoded['overview'] ?? null, 2000),
             companySize: $this->text($decoded['company_size'] ?? null, 255),
             estimatedValue: $this->text($decoded['estimated_value'] ?? null, 255),
+            estimatedValueGbp: $this->estimatedValueGbp($decoded),
             marketShare: $this->text($decoded['market_share'] ?? null, 255),
             logoUrl: $this->logoUrl($decoded['logo_url'] ?? null),
             website: FirstOrderDiamond::httpUrl($decoded['website'] ?? null),
@@ -70,7 +71,8 @@ class CompanyResearcher
         Use web search to estimate the company size, estimated net value, and market share. Then write a short overview of how strong this customer looks as a first-order lead.
 
         Reply with JSON only, no markdown, using these keys:
-        is_registered_company, overview, company_size, estimated_value, market_share, logo_url, website.
+        is_registered_company, overview, company_size, estimated_value, estimated_value_gbp, market_share, logo_url, website.
+        estimated_value_gbp is the estimated net value as a whole number of pounds, or null when it cannot be estimated.
         is_registered_company is true only when web search finds evidence this is a registered company, such as a company registration, an official website, or a reliable business listing. Use false for a private individual, a trading name with no company evidence, or when nothing reliable is found.
         logo_url must be a direct https URL of the company logo image file, such as a png, jpg, or webp, or null. Do not use a web page address.
         website must be the company's public website, or null.
@@ -128,6 +130,51 @@ class CompanyResearcher
         }
 
         return mb_substr($text, 0, $limit);
+    }
+
+    /**
+     * @param  array<string, mixed>  $decoded
+     */
+    private function estimatedValueGbp(array $decoded): ?int
+    {
+        $fromNumber = $this->pounds($decoded['estimated_value_gbp'] ?? null);
+        $fromText = $this->pounds($decoded['estimated_value'] ?? null);
+
+        if ($fromNumber !== null && $fromNumber < 1000 && $fromText !== null && $fromText > $fromNumber) {
+            return $fromText;
+        }
+
+        return $fromNumber ?? $fromText;
+    }
+
+    private function pounds(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value >= 0 ? $value : null;
+        }
+
+        if (is_float($value)) {
+            return $value >= 0 ? (int) round($value) : null;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(str_replace([',', '£', '€', '$'], '', trim($value)));
+
+        if (preg_match('/(\d+(?:\.\d+)?)\s*(billion|million|thousand|bn|m|k)?\b/', $normalized, $match) !== 1) {
+            return null;
+        }
+
+        $multiplier = match ($match[2] ?? '') {
+            'billion', 'bn' => 1_000_000_000,
+            'million', 'm' => 1_000_000,
+            'thousand', 'k' => 1_000,
+            default => 1,
+        };
+
+        return (int) round((float) $match[1] * $multiplier);
     }
 
     private function isRegisteredCompany(mixed $value): bool

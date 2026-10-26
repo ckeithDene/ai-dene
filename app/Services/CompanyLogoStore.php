@@ -12,19 +12,19 @@ class CompanyLogoStore
     /**
      * Store a company logo from a public image, the company website, or Odoo.
      */
-    public function store(int $partnerId, ?string $contents, ?string $url, ?string $website = null): ?string
+    public function store(int $partnerId, ?string $contents, ?string $url, ?string $website = null, string $directory = 'first-order-diamonds'): ?string
     {
-        $stored = $this->storeFromUrl($partnerId, $url)
-            ?? $this->storeFromWebsite($partnerId, $website);
+        $stored = $this->storeFromUrl($partnerId, $url, $directory)
+            ?? $this->storeFromWebsite($partnerId, $website, $directory);
 
         if ($stored !== null) {
             return $stored;
         }
 
-        return $this->storeContents($partnerId, $contents, 1);
+        return $this->storeContents($partnerId, $contents, 1, $directory);
     }
 
-    private function storeFromWebsite(int $partnerId, ?string $website): ?string
+    private function storeFromWebsite(int $partnerId, ?string $website, string $directory): ?string
     {
         $website = $this->httpsWebsite($website);
 
@@ -76,7 +76,7 @@ class CompanyLogoStore
         }
 
         if ($best !== null) {
-            return $this->storeContents($partnerId, $best, 1);
+            return $this->storeContents($partnerId, $best, 1, $directory);
         }
 
         $host = parse_url($website, PHP_URL_HOST);
@@ -94,7 +94,7 @@ class CompanyLogoStore
             return null;
         }
 
-        return $this->storeContents($partnerId, $favicon['contents'], 32);
+        return $this->storeContents($partnerId, $favicon['contents'], 32, $directory);
     }
 
     /**
@@ -152,7 +152,7 @@ class CompanyLogoStore
         return array_keys($ranked);
     }
 
-    private function storeFromUrl(int $partnerId, ?string $url): ?string
+    private function storeFromUrl(int $partnerId, ?string $url, string $directory): ?string
     {
         $image = $this->downloadImage($url, 1);
 
@@ -160,7 +160,7 @@ class CompanyLogoStore
             return null;
         }
 
-        return $this->storeContents($partnerId, $image['contents'], 1);
+        return $this->storeContents($partnerId, $image['contents'], 1, $directory);
     }
 
     /**
@@ -236,7 +236,7 @@ class CompanyLogoStore
         return null;
     }
 
-    private function storeContents(int $partnerId, ?string $contents, int $minimumWidth): ?string
+    private function storeContents(int $partnerId, ?string $contents, int $minimumWidth, string $directory): ?string
     {
         if ($contents === null || strlen($contents) > 2_000_000) {
             return null;
@@ -254,11 +254,13 @@ class CompanyLogoStore
             return null;
         }
 
+        $folder = preg_match('/^[a-z0-9-]+$/', $directory) === 1 ? $directory : 'first-order-diamonds';
+
         foreach (['png', 'jpg', 'gif', 'webp', 'ico'] as $existing) {
-            Storage::disk('public')->delete("first-order-diamonds/{$partnerId}.{$existing}");
+            Storage::disk('public')->delete("{$folder}/{$partnerId}.{$existing}");
         }
 
-        $path = "first-order-diamonds/{$partnerId}.{$extension}";
+        $path = "{$folder}/{$partnerId}.{$extension}";
 
         Storage::disk('public')->put($path, $contents);
 

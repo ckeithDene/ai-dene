@@ -20,6 +20,9 @@
                     <flux:sidebar.item icon="building-office-2" :href="route('first-order-diamonds')" :current="request()->routeIs('first-order-diamonds')" wire:navigate>
                         {{ __('First Order Diamonds') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
+                        {{ __('Biggest Fish') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
 
                 @if (auth()->user()->isAdmin())

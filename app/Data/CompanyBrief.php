@@ -9,6 +9,7 @@ readonly class CompanyBrief
         public string $overview,
         public string $companySize,
         public string $estimatedValue,
+        public ?int $estimatedValueGbp,
         public string $marketShare,
         public ?string $logoUrl,
         public ?string $website,

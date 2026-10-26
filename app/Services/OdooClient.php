@@ -59,6 +59,28 @@ class OdooClient
     }
 
     /**
+     * Summarise records that match an Odoo domain.
+     *
+     * @param  array<int, mixed>  $domain
+     * @param  array<int, string>  $fields
+     * @param  array<int, string>  $groupBy
+     * @return array<int, array<string, mixed>>
+     */
+    public function readGroup(string $model, array $domain, array $fields, array $groupBy): array
+    {
+        $result = $this->execute($model, 'read_group', [$domain, $fields, $groupBy], [
+            'lazy' => false,
+        ]);
+
+        if (! is_array($result) || ! array_is_list($result)) {
+            throw new RuntimeException('Could not read first orders from Odoo.');
+        }
+
+        /** @var array<int, array<string, mixed>> $result */
+        return $result;
+    }
+
+    /**
      * Call an Odoo model method.
      *
      * @param  array<int, mixed>  $args
