@@ -144,6 +144,7 @@ return [
 
     'features' => [
         Features::resetPasswords(),
+        Features::registration(),
     ],
 
 ];
