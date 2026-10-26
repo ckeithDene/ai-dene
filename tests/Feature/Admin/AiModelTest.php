@@ -352,11 +352,87 @@ test('testing an unsaved chatgpt connection does not call openai', function () {
     $this->actingAs(User::factory()->admin()->create());
 
     Livewire::test('pages::admin.ai-models')
-        ->call('testConnection');
+        ->call('testConnection')
+        ->assertHasErrors([
+            'model' => 'The model field is required.',
+            'apiKey' => 'The API key field is required.',
+        ]);
 
     Http::assertNothingSent();
 
     $this->assertDatabaseEmpty('ai_models');
+});
+
+test('testing a newly entered api key checks that key', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    AiModel::factory()->create([
+        'model' => 'gpt-4o',
+        'organization' => 'org-acme',
+        'api_key' => 'original-key',
+    ]);
+
+    Http::fake([
+        'https://api.openai.com/v1/models/gpt-4o' => Http::response([
+            'id' => 'gpt-4o',
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.ai-models')
+        ->set('organization', '')
+        ->set('apiKey', "Bearer sk-new-key\n")
+        ->call('testConnection')
+        ->assertHasNoErrors();
+
+    $aiModel = AiModel::query()->sole();
+
+    expect($aiModel->api_key)->toBe('sk-new-key')
+        ->and($aiModel->organization)->toBeNull();
+
+    Http::assertSent(function (Request $request) {
+        return $request->hasHeader('Authorization', 'Bearer sk-new-key')
+            && ! $request->hasHeader('OpenAI-Organization');
+    });
+});
+
+test('a long api key can be saved', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    $apiKey = 'sk-'.str_repeat('a', 300);
+
+    Http::fake([
+        'https://api.openai.com/v1/models/gpt-4o' => Http::response([
+            'id' => 'gpt-4o',
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.ai-models')
+        ->set('model', 'gpt-4o')
+        ->set('apiKey', $apiKey)
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect(AiModel::query()->sole()->api_key)->toBe($apiKey);
+});
+
+test('a rejected key explains when an organization is set', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    AiModel::factory()->create([
+        'model' => 'gpt-4o',
+        'organization' => 'org-acme',
+        'api_key' => 'original-key',
+    ]);
+
+    Http::fake([
+        'https://api.openai.com/v1/models/gpt-4o' => Http::response([
+            'error' => ['message' => 'invalid_api_key'],
+        ], 401),
+    ]);
+
+    Livewire::test('pages::admin.ai-models')
+        ->call('testConnection')
+        ->assertSee('Clear the organization field unless this key belongs to that organization.');
 });
 
 test('non-admins cannot test the chatgpt connection', function () {

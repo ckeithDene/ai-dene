@@ -41,7 +41,9 @@ class OpenAiConnectionVerifier
         }
 
         $message = match ($response->status()) {
-            401 => __('OpenAI rejected the API key.'),
+            401 => filled($aiModel->organization)
+                ? __('OpenAI rejected the API key. Clear the organization field unless this key belongs to that organization.')
+                : __('OpenAI rejected the API key.'),
             403 => __('OpenAI refused access to that model.'),
             404 => __('OpenAI could not find that model.'),
             default => __('OpenAI returned an unexpected response.'),

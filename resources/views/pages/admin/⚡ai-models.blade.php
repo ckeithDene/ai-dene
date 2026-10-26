@@ -42,7 +42,7 @@ new #[Title('AI Models')] class extends Component {
 
         $this->model = trim($this->model);
         $this->organization = trim($this->organization);
-        $this->apiKey = trim($this->apiKey);
+        $this->apiKey = $this->normalizedApiKey($this->apiKey);
 
         $validated = $this->validate([
             'model' => ['required', 'string', 'max:255'],
@@ -50,7 +50,7 @@ new #[Title('AI Models')] class extends Component {
             'apiKey' => [
                 Rule::requiredIf(fn (): bool => blank(AiModel::current()?->api_key)),
                 'string',
-                'max:255',
+                'max:2000',
             ],
         ], [], [
             'model' => __('model'),
@@ -81,21 +81,25 @@ new #[Title('AI Models')] class extends Component {
     }
 
     /**
-     * Check the saved ChatGPT connection.
+     * Store the form and check that ChatGPT connection.
      */
     public function testConnection(): void
     {
-        $this->authorizeAccess();
+        $this->save();
+    }
 
-        $aiModel = AiModel::current();
+    /**
+     * Remove paste artifacts from an API key.
+     */
+    protected function normalizedApiKey(string $apiKey): string
+    {
+        $apiKey = trim(str_replace(["\u{200B}", "\u{FEFF}"], '', $apiKey));
 
-        if ($aiModel === null) {
-            Flux::toast(variant: 'danger', text: __('Save the connection before testing it.'));
-
-            return;
+        if (preg_match('/^bearer\s+/i', $apiKey) === 1) {
+            $apiKey = preg_replace('/^bearer\s+/i', '', $apiKey) ?? $apiKey;
         }
 
-        $this->recordVerification($aiModel);
+        return preg_replace('/\s+/u', '', $apiKey) ?? $apiKey;
     }
 
     #[Computed]
@@ -177,7 +181,7 @@ new #[Title('AI Models')] class extends Component {
                 type="text"
                 autocomplete="off"
                 placeholder="org-abc123"
-                :description="__('Optional. The OpenAI organization this key belongs to.')"
+                :description="__('Leave this blank unless the key belongs to an OpenAI organization. A wrong value makes a valid key look rejected.')"
             />
 
             <flux:input
