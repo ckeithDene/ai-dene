@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Data\CompanyBrief;
 use App\Models\AiModel;
+use App\Models\FirstOrderDiamond;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -51,11 +52,13 @@ class CompanyResearcher
         }
 
         return new CompanyBrief(
+            isRegisteredCompany: $this->isRegisteredCompany($decoded['is_registered_company'] ?? null),
             overview: $this->text($decoded['overview'] ?? null, 2000),
             companySize: $this->text($decoded['company_size'] ?? null, 255),
             estimatedValue: $this->text($decoded['estimated_value'] ?? null, 255),
             marketShare: $this->text($decoded['market_share'] ?? null, 255),
             logoUrl: $this->logoUrl($decoded['logo_url'] ?? null),
+            website: FirstOrderDiamond::httpUrl($decoded['website'] ?? null),
         );
     }
 
@@ -67,8 +70,10 @@ class CompanyResearcher
         Use web search to estimate the company size, estimated net value, and market share. Then write a short overview of how strong this customer looks as a first-order lead.
 
         Reply with JSON only, no markdown, using these keys:
-        overview, company_size, estimated_value, market_share, logo_url.
+        is_registered_company, overview, company_size, estimated_value, market_share, logo_url, website.
+        is_registered_company is true only when web search finds evidence this is a registered company, such as a company registration, an official website, or a reliable business listing. Use false for a private individual, a trading name with no company evidence, or when nothing reliable is found.
         logo_url must be a direct https URL of the company logo image, or null.
+        website must be the company's public website, or null.
         Use "Unknown" when a fact cannot be found.
 
         Company name: {$company}
@@ -123,6 +128,23 @@ class CompanyResearcher
         }
 
         return mb_substr($text, 0, $limit);
+    }
+
+    private function isRegisteredCompany(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value)) {
+            return $value === 1;
+        }
+
+        if (! is_string($value)) {
+            return false;
+        }
+
+        return in_array(strtolower(trim($value)), ['1', 'true', 'yes'], true);
     }
 
     private function logoUrl(mixed $value): ?string

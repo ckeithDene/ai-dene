@@ -11,6 +11,9 @@ readonly class FirstOrderLead
         public ?string $orderedAt,
         public string $companyName,
         public string $address,
+        public ?string $website,
         public ?string $logoContents,
+        /** @var array<int, array{quantity: string, name: string}> */
+        public array $orderLines,
     ) {}
 }

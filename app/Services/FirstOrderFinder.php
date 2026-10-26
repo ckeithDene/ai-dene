@@ -46,7 +46,7 @@ class FirstOrderFinder
                     ['state', 'in', ['sale', 'done']],
                     ['date_order', '>=', self::FIRST_ORDER_FROM],
                 ],
-                ['id', 'name', 'date_order', 'partner_id'],
+                ['id', 'name', 'date_order', 'partner_id', 'order_line'],
                 'date_order asc, id asc',
                 self::PAGE_SIZE,
                 $offset,
@@ -57,6 +57,7 @@ class FirstOrderFinder
             }
 
             $partners = $this->companies($client, $orders);
+            $lines = $this->linesByOrder($client, $orders);
 
             foreach ($orders as $order) {
                 if (! $this->isInReviewWindow($order['date_order'] ?? null)) {
@@ -82,7 +83,8 @@ class FirstOrderFinder
                     continue;
                 }
 
-                $leads[] = $this->lead($order, $companyId, $company);
+                $orderId = $this->relationId($order['id'] ?? null) ?? 0;
+                $leads[] = $this->lead($order, $companyId, $company, $lines[$orderId] ?? []);
 
                 if (count($leads) >= self::MAX_NEW_LEADS) {
                     return $leads;
@@ -147,6 +149,7 @@ class FirstOrderFinder
             'zip',
             'country_id',
             'commercial_partner_id',
+            'website',
             'image_512',
         ]) as $partner) {
             $id = $this->relationId($partner['id'] ?? null);
@@ -184,10 +187,94 @@ class FirstOrderFinder
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $orders
+     * @return array<int, array<int, array{quantity: string, name: string}>>
+     */
+    private function linesByOrder(OdooClient $client, array $orders): array
+    {
+        $lineIds = [];
+
+        foreach ($orders as $order) {
+            if (! is_array($order['order_line'] ?? null)) {
+                continue;
+            }
+
+            foreach ($order['order_line'] as $lineId) {
+                if (is_int($lineId)) {
+                    $lineIds[] = $lineId;
+                }
+            }
+        }
+
+        $lineIds = array_values(array_unique($lineIds));
+
+        if ($lineIds === []) {
+            return [];
+        }
+
+        $grouped = [];
+
+        foreach ($client->read('sale.order.line', $lineIds, ['name', 'product_uom_qty', 'order_id', 'product_id']) as $line) {
+            $orderId = $this->relationId($line['order_id'] ?? null);
+
+            if ($orderId === null || count($grouped[$orderId] ?? []) >= 15) {
+                continue;
+            }
+
+            $name = $this->lineName($line);
+
+            if ($name === null) {
+                continue;
+            }
+
+            $grouped[$orderId][] = [
+                'quantity' => $this->quantity($line['product_uom_qty'] ?? 1),
+                'name' => $name,
+            ];
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * @param  array<string, mixed>  $line
+     */
+    private function lineName(array $line): ?string
+    {
+        $name = $this->relationName($line['product_id'] ?? null);
+
+        if ($name === null && is_string($line['name'] ?? null)) {
+            $name = trim(explode("\n", str_replace("\r", '', $line['name']))[0]);
+        }
+
+        if ($name === null || $name === '') {
+            return null;
+        }
+
+        return mb_substr($name, 0, 255);
+    }
+
+    private function quantity(mixed $value): string
+    {
+        if (! is_numeric($value)) {
+            return '1';
+        }
+
+        $quantity = (float) $value;
+
+        if (floor($quantity) === $quantity) {
+            return (string) (int) $quantity;
+        }
+
+        return rtrim(rtrim(number_format($quantity, 2, '.', ''), '0'), '.');
+    }
+
+    /**
      * @param  array<string, mixed>  $order
      * @param  array<string, mixed>  $company
+     * @param  array<int, array{quantity: string, name: string}>  $orderLines
      */
-    private function lead(array $order, int $companyId, array $company): FirstOrderLead
+    private function lead(array $order, int $companyId, array $company, array $orderLines): FirstOrderLead
     {
         $orderId = $this->relationId($order['id'] ?? null) ?? 0;
         $orderedAt = is_string($order['date_order'] ?? null) ? $order['date_order'] : null;
@@ -203,7 +290,9 @@ class FirstOrderFinder
             orderedAt: $orderedAt,
             companyName: mb_substr($companyName, 0, 255),
             address: $this->address($company),
+            website: is_string($company['website'] ?? null) ? trim($company['website']) : null,
             logoContents: $this->logoContents($company['image_512'] ?? null),
+            orderLines: $orderLines,
         );
     }
 

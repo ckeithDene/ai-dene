@@ -15,9 +15,12 @@ use Illuminate\Support\Facades\Storage;
  * @property int $odoo_partner_id
  * @property int $odoo_order_id
  * @property string $order_name
+ * @property array<int, array{quantity: string, name: string}>|null $order_lines
  * @property Carbon|null $ordered_at
  * @property string $company_name
+ * @property bool $is_registered_company
  * @property string|null $address
+ * @property string|null $website
  * @property string|null $logo_path
  * @property string|null $overview
  * @property string|null $company_size
@@ -33,9 +36,12 @@ use Illuminate\Support\Facades\Storage;
     'odoo_partner_id',
     'odoo_order_id',
     'order_name',
+    'order_lines',
     'ordered_at',
     'company_name',
+    'is_registered_company',
     'address',
+    'website',
     'logo_path',
     'overview',
     'company_size',
@@ -63,6 +69,66 @@ class FirstOrderDiamond extends Model
     }
 
     /**
+     * Keep only a normal web address that a person can open.
+     */
+    public static function httpUrl(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        if (! str_contains($value, '://')) {
+            $value = 'https://'.$value;
+        }
+
+        $scheme = parse_url($value, PHP_URL_SCHEME);
+
+        if (! in_array($scheme, ['http', 'https'], true) || filter_var($value, FILTER_VALIDATE_URL) === false) {
+            return null;
+        }
+
+        return mb_substr($value, 0, 255);
+    }
+
+    /**
+     * Get a safe link for the company website.
+     */
+    public function websiteUrl(): ?string
+    {
+        return self::httpUrl($this->website);
+    }
+
+    /**
+     * Get the host shown for the company website.
+     */
+    public function websiteLabel(): ?string
+    {
+        $host = parse_url((string) $this->websiteUrl(), PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? $host : null;
+    }
+
+    /**
+     * Get the Odoo form for this sales order.
+     */
+    public function odooOrderUrl(): ?string
+    {
+        $baseUrl = once(fn (): ?string => OdooConnection::current()?->url);
+
+        if (! is_string($baseUrl) || $baseUrl === '') {
+            return null;
+        }
+
+        return rtrim($baseUrl, '/').'/web#id='.$this->odoo_order_id.'&model=sale.order&view_type=form';
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -72,6 +138,8 @@ class FirstOrderDiamond extends Model
         return [
             'ordered_at' => 'datetime',
             'checked_at' => 'datetime',
+            'is_registered_company' => 'boolean',
+            'order_lines' => 'array',
             'status' => FirstOrderDiamondStatus::class,
         ];
     }

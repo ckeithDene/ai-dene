@@ -63,6 +63,8 @@ class ReviewFirstOrderDiamonds
             'ordered_at' => $lead->orderedAt,
             'company_name' => $lead->companyName,
             'address' => $lead->address !== '' ? $lead->address : null,
+            'website' => FirstOrderDiamond::httpUrl($lead->website),
+            'order_lines' => $lead->orderLines === [] ? null : $lead->orderLines,
             'status' => FirstOrderDiamondStatus::Pending,
             'failure_reason' => null,
         ]);
@@ -70,6 +72,25 @@ class ReviewFirstOrderDiamonds
 
         try {
             $brief = (new CompanyResearcher)->research($aiModel, $lead->companyName, $lead->address);
+
+            if (! $brief->isRegisteredCompany) {
+                $diamond->fill([
+                    'overview' => null,
+                    'company_size' => null,
+                    'estimated_value' => null,
+                    'market_share' => null,
+                    'website' => null,
+                    'logo_path' => null,
+                    'is_registered_company' => false,
+                    'status' => FirstOrderDiamondStatus::Complete,
+                    'failure_reason' => null,
+                    'checked_at' => now(),
+                ]);
+                $diamond->save();
+
+                return;
+            }
+
             $logoPath = (new CompanyLogoStore)->store($lead->partnerId, $lead->logoContents, $brief->logoUrl);
 
             $diamond->fill([
@@ -77,7 +98,9 @@ class ReviewFirstOrderDiamonds
                 'company_size' => $brief->companySize,
                 'estimated_value' => $brief->estimatedValue,
                 'market_share' => $brief->marketShare,
+                'website' => $diamond->website ?? $brief->website,
                 'logo_path' => $logoPath ?? $diamond->logo_path,
+                'is_registered_company' => true,
                 'status' => FirstOrderDiamondStatus::Complete,
                 'failure_reason' => null,
                 'checked_at' => now(),

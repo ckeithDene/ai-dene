@@ -42,6 +42,7 @@ new #[Title('First Order Diamonds')] class extends Component {
     public function diamonds(): Collection
     {
         return FirstOrderDiamond::query()
+            ->where('is_registered_company', true)
             ->latest('ordered_at')
             ->latest('id')
             ->limit(48)
@@ -64,7 +65,7 @@ new #[Title('First Order Diamonds')] class extends Component {
     </div>
 
     @if ($this->diamonds->isEmpty())
-        <flux:text>{{ __('No first orders have been reviewed yet.') }}</flux:text>
+        <flux:text>{{ __('No registered-company first orders to show yet.') }}</flux:text>
     @else
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             @foreach ($this->diamonds as $diamond)
@@ -99,14 +100,30 @@ new #[Title('First Order Diamonds')] class extends Component {
                                 <flux:text class="mt-1">{{ $diamond->address }}</flux:text>
                             @endif
 
-                            <flux:text class="mt-1">
-                                {{ $diamond->order_name }}
-                                @if ($diamond->ordered_at)
-                                    · {{ $diamond->ordered_at->timezone(config('app.timezone'))->format('j M Y') }}
-                                @endif
-                            </flux:text>
+                            <flux:text class="mt-1">{{ $diamond->order_name }}</flux:text>
                         </div>
                     </div>
+
+                    <dl class="grid gap-3 text-sm">
+                        <div>
+                            <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Order date') }}</dt>
+                            <dd>{{ $diamond->ordered_at?->timezone(config('app.timezone'))->format('j M Y') ?: __('Unknown') }}</dd>
+                        </div>
+                        @if (filled($diamond->order_lines))
+                            <div>
+                                <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Ordered') }}</dt>
+                                <dd>
+                                    <ul>
+                                        @foreach ($diamond->order_lines as $line)
+                                            @if (is_array($line) && is_string($line['name'] ?? null) && $line['name'] !== '')
+                                                <li>{{ is_string($line['quantity'] ?? null) ? $line['quantity'] : '1' }} × {{ $line['name'] }}</li>
+                                            @endif
+                                        @endforeach
+                                    </ul>
+                                </dd>
+                            </div>
+                        @endif
+                    </dl>
 
                     @if ($diamond->status === FirstOrderDiamondStatus::Failed)
                         <flux:callout variant="danger" icon="x-circle" :heading="__('Review failed')" :text="$diamond->failure_reason" />
@@ -129,6 +146,21 @@ new #[Title('First Order Diamonds')] class extends Component {
                                 <dd>{{ $diamond->market_share ?: __('Unknown') }}</dd>
                             </div>
                         </dl>
+                    @endif
+
+                    @if ($diamond->websiteUrl() || $diamond->odooOrderUrl())
+                        <div class="flex flex-wrap gap-4">
+                            @if ($diamond->websiteLabel())
+                                <flux:link :href="$diamond->websiteUrl()" target="_blank" rel="noopener noreferrer">
+                                    {{ $diamond->websiteLabel() }}
+                                </flux:link>
+                            @endif
+                            @if ($diamond->odooOrderUrl())
+                                <flux:link :href="$diamond->odooOrderUrl()" target="_blank" rel="noopener noreferrer">
+                                    {{ __('View in Odoo') }}
+                                </flux:link>
+                            @endif
+                        </div>
                     @endif
                 </flux:card>
             @endforeach

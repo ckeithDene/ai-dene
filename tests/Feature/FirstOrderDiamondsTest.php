@@ -24,9 +24,19 @@ test('guests are redirected to the login page', function () {
 test('authenticated users can view reviewed first orders', function () {
     $user = User::factory()->create();
 
+    OdooConnection::factory()->create([
+        'url' => 'https://acme.odoo.com',
+    ]);
+
     FirstOrderDiamond::factory()->create([
+        'odoo_order_id' => 44,
         'company_name' => 'Acme Ltd',
         'overview' => 'A strong first-order lead.',
+        'ordered_at' => '2026-10-03 09:00:00',
+        'website' => 'https://acme.example',
+        'order_lines' => [
+            ['quantity' => '2', 'name' => 'Oak door'],
+        ],
     ]);
 
     $this->actingAs($user)
@@ -35,6 +45,11 @@ test('authenticated users can view reviewed first orders', function () {
         ->assertSee('First Order Diamonds')
         ->assertSee('Acme Ltd')
         ->assertSee('A strong first-order lead.')
+        ->assertSee('3 Oct 2026')
+        ->assertSee('2 × Oak door')
+        ->assertSee('acme.example')
+        ->assertSee('View in Odoo')
+        ->assertSee('https://acme.odoo.com/web#id=44&amp;model=sale.order&amp;view_type=form', false)
         ->assertDontSee('Check now');
 });
 
@@ -43,19 +58,24 @@ test('the first order page escapes company details', function () {
 
     FirstOrderDiamond::factory()->create([
         'company_name' => '<script>alert(1)</script>',
+        'order_lines' => [
+            ['quantity' => '1', 'name' => '<script>alert(2)</script>'],
+        ],
     ]);
 
     $this->get(route('first-order-diamonds'))
         ->assertOk()
         ->assertDontSee('<script>alert(1)</script>', false)
-        ->assertSee('&lt;script&gt;alert(1)&lt;/script&gt;', false);
+        ->assertDontSee('<script>alert(2)</script>', false)
+        ->assertSee('&lt;script&gt;alert(1)&lt;/script&gt;', false)
+        ->assertSee('&lt;script&gt;alert(2)&lt;/script&gt;', false);
 });
 
 test('the page explains when no first orders have been reviewed', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('first-order-diamonds'))
         ->assertOk()
-        ->assertSee('No first orders have been reviewed yet.');
+        ->assertSee('No registered-company first orders to show yet.');
 });
 
 test('non-admins cannot start a first order check', function () {
@@ -83,11 +103,13 @@ test('admins can review a confirmed first order', function () {
         if ($request->url() === 'https://api.openai.com/v1/responses') {
             return Http::response([
                 'output_text' => json_encode([
+                    'is_registered_company' => true,
                     'overview' => 'Acme looks like a strong regional manufacturer.',
                     'company_size' => '200 employees',
                     'estimated_value' => '£40 million',
                     'market_share' => 'Small regional share',
                     'logo_url' => null,
+                    'website' => 'https://acme.example',
                 ]),
             ]);
         }
@@ -108,6 +130,7 @@ test('admins can review a confirmed first order', function () {
                     'name' => 'S00010',
                     'date_order' => '2026-10-01 10:00:00',
                     'partner_id' => [9, 'Jane Smith'],
+                    'order_line' => [101],
                     'state' => 'sale',
                 ],
                 [
@@ -118,6 +141,16 @@ test('admins can review a confirmed first order', function () {
                     'state' => 'sale',
                 ],
             ]));
+        }
+
+        if ($model === 'sale.order.line') {
+            return Http::response(['result' => [[
+                'id' => 101,
+                'name' => 'Oak door',
+                'product_uom_qty' => 2,
+                'order_id' => [10, 'S00010'],
+                'product_id' => [50, 'Oak door'],
+            ]]]);
         }
 
         $ids = $call[5][0] ?? [];
@@ -153,12 +186,19 @@ test('admins can review a confirmed first order', function () {
         ->call('checkNow')
         ->assertSee('Acme Ltd')
         ->assertSee('Acme looks like a strong regional manufacturer.')
-        ->assertSee('200 employees');
+        ->assertSee('200 employees')
+        ->assertSee('2 × Oak door')
+        ->assertSee('1 Oct 2026')
+        ->assertSee('acme.example')
+        ->assertSee('View in Odoo');
 
     $diamond = FirstOrderDiamond::query()->sole();
 
     expect($diamond->odoo_partner_id)->toBe(5)
         ->and($diamond->order_name)->toBe('S00010')
+        ->and($diamond->order_lines)->toBe([['quantity' => '2', 'name' => 'Oak door']])
+        ->and($diamond->website)->toBe('https://acme.example')
+        ->and($diamond->is_registered_company)->toBeTrue()
         ->and($diamond->address)->toBe('1 High Street, London, SW1A 1AA, United Kingdom')
         ->and($diamond->status)->toBe(FirstOrderDiamondStatus::Complete)
         ->and($diamond->logo_path)->toBe('first-order-diamonds/5.png');
@@ -285,6 +325,89 @@ test('a failed chatgpt review is not reviewed again', function () {
     expect($reviews)->toBe(1);
 });
 
+test('a customer with no evidence of a registered company is saved but not shown', function () {
+    OdooConnection::factory()->create();
+    AiModel::factory()->create();
+    $user = User::factory()->create();
+
+    Http::fake(function (Request $request) {
+        if ($request->url() === 'https://api.openai.com/v1/responses') {
+            return Http::response([
+                'output_text' => json_encode([
+                    'is_registered_company' => false,
+                    'overview' => 'Nothing reliable was found.',
+                    'company_size' => 'Unknown',
+                    'estimated_value' => 'Unknown',
+                    'market_share' => 'Unknown',
+                    'logo_url' => null,
+                    'website' => null,
+                ]),
+            ]);
+        }
+
+        $params = $request->data()['params'] ?? [];
+
+        if (($params['method'] ?? null) === 'authenticate') {
+            return Http::response(['result' => 7]);
+        }
+
+        if (($params['args'][3] ?? null) === 'sale.order') {
+            return Http::response(firstOrderSaleOrders($params['args'], [[
+                'id' => 10,
+                'name' => 'S00010',
+                'date_order' => '2026-10-02 10:00:00',
+                'partner_id' => [5, 'Jane Smith'],
+                'state' => 'sale',
+            ]]));
+        }
+
+        return Http::response(['result' => [[
+            'id' => 5,
+            'name' => 'Jane Smith',
+            'street' => false,
+            'street2' => false,
+            'city' => false,
+            'zip' => false,
+            'country_id' => false,
+            'commercial_partner_id' => [5, 'Jane Smith'],
+            'website' => false,
+            'image_512' => false,
+        ]]]);
+    });
+
+    app(ReviewFirstOrderDiamonds::class)->handle();
+
+    $diamond = FirstOrderDiamond::query()->sole();
+
+    expect($diamond->status)->toBe(FirstOrderDiamondStatus::Complete)
+        ->and($diamond->is_registered_company)->toBeFalse()
+        ->and($diamond->overview)->toBeNull();
+
+    $result = app(ReviewFirstOrderDiamonds::class)->handle();
+
+    expect($result->reviewed)->toBe(0);
+
+    $this->actingAs($user)
+        ->get(route('first-order-diamonds'))
+        ->assertOk()
+        ->assertDontSee('Jane Smith')
+        ->assertDontSee('Nothing reliable was found.');
+});
+
+test('a customer website only links to a public web address', function () {
+    $this->actingAs(User::factory()->create());
+
+    FirstOrderDiamond::factory()->create([
+        'company_name' => 'Acme Ltd',
+        'website' => 'javascript:alert(1)',
+    ]);
+
+    $this->get(route('first-order-diamonds'))
+        ->assertOk()
+        ->assertSee('Acme Ltd')
+        ->assertDontSee('javascript:alert(1)', false);
+});
+
 test('orders before 1 October 2026 are not reviewed', function () {
     OdooConnection::factory()->create();
     AiModel::factory()->create();
@@ -380,11 +503,13 @@ test('a private logo url is not downloaded', function () {
         if ($request->url() === 'https://api.openai.com/v1/responses') {
             return Http::response([
                 'output_text' => json_encode([
+                    'is_registered_company' => true,
                     'overview' => 'A useful lead.',
                     'company_size' => 'Unknown',
                     'estimated_value' => 'Unknown',
                     'market_share' => 'Unknown',
                     'logo_url' => 'https://127.0.0.1/logo.png',
+                    'website' => null,
                 ]),
             ]);
         }
