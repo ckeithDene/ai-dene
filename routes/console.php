@@ -9,3 +9,8 @@ Schedule::call(function () {
         ->where('expires_at', '<', now())
         ->delete();
 })->daily()->description('Delete expired team invitations');
+
+Schedule::command('first-order-diamonds:check')
+    ->hourly()
+    ->withoutOverlapping(180)
+    ->runInBackground();

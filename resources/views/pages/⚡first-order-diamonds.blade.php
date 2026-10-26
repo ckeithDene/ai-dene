@@ -1,0 +1,137 @@
+<?php
+
+use App\Actions\ReviewFirstOrderDiamonds;
+use App\Enums\FirstOrderDiamondStatus;
+use App\Models\FirstOrderDiamond;
+use Flux\Flux;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Gate;
+use Livewire\Attributes\Computed;
+use Livewire\Attributes\Title;
+use Livewire\Component;
+
+new #[Title('First Order Diamonds')] class extends Component {
+    /**
+     * Review new confirmed first orders now.
+     */
+    public function checkNow(): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $result = app(ReviewFirstOrderDiamonds::class)->handle();
+
+        unset($this->diamonds);
+
+        if ($result->skippedReason !== null) {
+            Flux::toast(variant: 'danger', text: $result->skippedReason);
+
+            return;
+        }
+
+        Flux::toast(variant: 'success', text: trans_choice(
+            'Reviewed :count first order.|Reviewed :count first orders.',
+            $result->reviewed,
+            ['count' => $result->reviewed],
+        ));
+    }
+
+    /**
+     * @return Collection<int, FirstOrderDiamond>
+     */
+    #[Computed]
+    public function diamonds(): Collection
+    {
+        return FirstOrderDiamond::query()
+            ->latest('ordered_at')
+            ->latest('id')
+            ->limit(48)
+            ->get();
+    }
+}; ?>
+
+<div class="flex h-full w-full flex-1 flex-col gap-6">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+            <flux:heading size="xl">{{ __('First Order Diamonds') }}</flux:heading>
+            <flux:subheading>{{ __('How strong confirmed first orders from 1 October 2026 look as leads. Each company is reviewed once. New orders are checked every hour, up to 20 companies at a time.') }}</flux:subheading>
+        </div>
+
+        @if (auth()->user()->isAdmin())
+            <flux:button wire:click="checkNow" icon="arrow-path" data-test="check-first-orders-button">
+                {{ __('Check now') }}
+            </flux:button>
+        @endif
+    </div>
+
+    @if ($this->diamonds->isEmpty())
+        <flux:text>{{ __('No first orders have been reviewed yet.') }}</flux:text>
+    @else
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            @foreach ($this->diamonds as $diamond)
+                <flux:card wire:key="diamond-{{ $diamond->id }}" class="flex flex-col gap-4">
+                    <div class="flex items-start gap-4">
+                        @if ($diamond->logoUrl())
+                            <img
+                                src="{{ $diamond->logoUrl() }}"
+                                alt="{{ $diamond->company_name }}"
+                                class="size-16 shrink-0 rounded-lg bg-white object-contain"
+                            />
+                        @else
+                            <div class="flex size-16 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-700">
+                                <flux:icon icon="building-office-2" class="size-8 text-zinc-500" />
+                            </div>
+                        @endif
+
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-start justify-between gap-2">
+                                <flux:heading class="truncate">{{ $diamond->company_name }}</flux:heading>
+
+                                @if ($diamond->status === FirstOrderDiamondStatus::Failed)
+                                    <flux:badge color="red">{{ __('Failed') }}</flux:badge>
+                                @elseif ($diamond->status === FirstOrderDiamondStatus::Complete)
+                                    <flux:badge color="green">{{ __('Reviewed') }}</flux:badge>
+                                @else
+                                    <flux:badge color="zinc">{{ __('Pending') }}</flux:badge>
+                                @endif
+                            </div>
+
+                            @if (filled($diamond->address))
+                                <flux:text class="mt-1">{{ $diamond->address }}</flux:text>
+                            @endif
+
+                            <flux:text class="mt-1">
+                                {{ $diamond->order_name }}
+                                @if ($diamond->ordered_at)
+                                    · {{ $diamond->ordered_at->timezone(config('app.timezone'))->format('j M Y') }}
+                                @endif
+                            </flux:text>
+                        </div>
+                    </div>
+
+                    @if ($diamond->status === FirstOrderDiamondStatus::Failed)
+                        <flux:callout variant="danger" icon="x-circle" :heading="__('Review failed')" :text="$diamond->failure_reason" />
+                    @else
+                        @if (filled($diamond->overview))
+                            <flux:text>{{ $diamond->overview }}</flux:text>
+                        @endif
+
+                        <dl class="grid gap-3 text-sm">
+                            <div>
+                                <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Company size') }}</dt>
+                                <dd>{{ $diamond->company_size ?: __('Unknown') }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Estimated value') }}</dt>
+                                <dd>{{ $diamond->estimated_value ?: __('Unknown') }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Market share') }}</dt>
+                                <dd>{{ $diamond->market_share ?: __('Unknown') }}</dd>
+                            </div>
+                        </dl>
+                    @endif
+                </flux:card>
+            @endforeach
+        </div>
+    @endif
+</div>

@@ -5,6 +5,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
 
+Route::middleware(['auth', 'verified'])->group(function () {
+    Route::livewire('first-order-diamonds', 'pages::first-order-diamonds')->name('first-order-diamonds');
+});
+
 Route::prefix('{current_team}')
     ->middleware(['auth', 'verified', EnsureTeamMembership::class])
     ->group(function () {
