@@ -18,6 +18,17 @@
                         {{ __('Dashboard') }}
                     </flux:sidebar.item>
                 </flux:sidebar.group>
+
+                @if (auth()->user()->isAdmin())
+                    <flux:sidebar.group :heading="__('Admin')" class="grid">
+                        <flux:sidebar.item icon="server" :href="route('admin.odoo')" :current="request()->routeIs('admin.odoo')" wire:navigate>
+                            {{ __('Odoo connection') }}
+                        </flux:sidebar.item>
+                        <flux:sidebar.item icon="sparkles" :href="route('admin.ai-models')" :current="request()->routeIs('admin.ai-models')" wire:navigate>
+                            {{ __('AI Models') }}
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @endif
             </flux:sidebar.nav>
 
             <flux:spacer />

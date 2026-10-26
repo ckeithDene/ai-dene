@@ -12,3 +12,4 @@ Route::prefix('{current_team}')
     });
 
 require __DIR__.'/settings.php';
+require __DIR__.'/admin.php';
