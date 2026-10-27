@@ -23,6 +23,9 @@
                     <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
                         {{ __('Biggest Fish') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="map-pin" :href="route('primary-care-spaces')" :current="request()->routeIs('primary-care-spaces*')" wire:navigate>
+                        {{ __('Primary Care Spaces') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
 
                 @if (auth()->user()->isAdmin())

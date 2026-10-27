@@ -19,3 +19,8 @@ Schedule::command('biggest-fish:check')
     ->hourly()
     ->withoutOverlapping(180)
     ->runInBackground();
+
+Schedule::command('primary-care-spaces:check')
+    ->daily()
+    ->withoutOverlapping(180)
+    ->runInBackground();
