@@ -131,7 +131,7 @@ new #[Title('Biggest Fish')] class extends Component {
                             </div>
                             <div>
                                 <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Estimated value') }}</dt>
-                                <dd>{{ $fish->estimated_value ?: __('Unknown') }}</dd>
+                                <dd>{{ $fish->estimatedValueLabel() }}</dd>
                             </div>
                             <div>
                                 <dt class="text-zinc-500 dark:text-zinc-400">{{ __('Market share') }}</dt>

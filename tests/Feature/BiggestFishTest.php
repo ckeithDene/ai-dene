@@ -79,6 +79,33 @@ test('biggest fish are listed by estimated value with the total spent', function
     expect($reviews)->toBe(3);
 });
 
+test('a numeric estimated value is shown in pounds', function () {
+    $this->actingAs(User::factory()->create());
+
+    BiggestFish::factory()->create([
+        'company_name' => 'Plain Number Ltd',
+        'estimated_value' => '45000000',
+        'estimated_value_gbp' => 45_000_000,
+    ]);
+    BiggestFish::factory()->create([
+        'company_name' => 'Pence Number Ltd',
+        'estimated_value' => '21000000.5',
+        'estimated_value_gbp' => 21_000_001,
+    ]);
+    BiggestFish::factory()->create([
+        'company_name' => 'Written Value Ltd',
+        'estimated_value' => '£40 million',
+        'estimated_value_gbp' => 40_000_000,
+    ]);
+
+    $this->get(route('biggest-fish'))
+        ->assertOk()
+        ->assertSee('£45,000,000')
+        ->assertSee('£21,000,000.50')
+        ->assertSee('£40 million')
+        ->assertDontSee('45000000');
+});
+
 test('the biggest fish page escapes company details', function () {
     $this->actingAs(User::factory()->create());
 

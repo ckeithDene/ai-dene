@@ -117,6 +117,28 @@ class BiggestFish extends Model
     }
 
     /**
+     * Get the estimated value, with a plain number shown in pounds.
+     */
+    public function estimatedValueLabel(): string
+    {
+        $value = trim((string) $this->estimated_value);
+
+        if ($value === '') {
+            return __('Unknown');
+        }
+
+        $amount = str_replace([',', ' ', '£', '€', '$'], '', $value);
+
+        if (preg_match('/^\d+(?:\.\d+)?$/', $amount) !== 1) {
+            return $value;
+        }
+
+        $hasPence = preg_match('/\.\d*[1-9]/', $amount) === 1;
+
+        return '£'.number_format((float) $amount, $hasPence ? 2 : 0);
+    }
+
+    /**
      * Get the confirmed-order total in a readable form.
      */
     public function totalSpentLabel(): string
