@@ -173,6 +173,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->assertSee('Potential gap')
         ->assertSee('Carbon reporting was added.')
         ->assertSee('https://www.england.nhs.uk/carbon-reporting')
+        ->assertSee('The rule does not order them to replace stock.')
         ->assertSee('Design for Life roadmap')
         ->assertSee('Source link not found')
         ->assertSee('One GP-relevant reporting change.')
@@ -192,7 +193,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
 
     $recorded = collect(Http::recorded());
 
-    expect($recorded->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(6)
+    expect($recorded->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(8)
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'midmeds.odoo.com')))->toBeFalse()
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'dene.odoo.com')))->toBeTrue();
 
@@ -243,7 +244,7 @@ test('catalogue matching waits until the dene connection exists', function () {
         ->call('run')
         ->assertSee('Catalogue matching required.');
 
-    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(2);
+    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(3);
 });
 
 test('a written research answer is saved as directives', function () {

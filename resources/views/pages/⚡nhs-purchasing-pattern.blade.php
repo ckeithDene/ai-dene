@@ -84,6 +84,12 @@ new #[Title('NHS purchasing pattern')] class extends Component {
                     @if (filled($directive->summary))
                         <flux:text>{{ $directive->summary }}</flux:text>
                     @endif
+                    @if (filled($directive->commercial_implications))
+                        <div>
+                            <flux:heading>{{ __('How purchasing could change') }}</flux:heading>
+                            <flux:text class="mt-1">{{ $directive->commercial_implications }}</flux:text>
+                        </div>
+                    @endif
                     <dl class="grid gap-3 text-sm md:grid-cols-3">
                         @foreach ([
                             __('Published') => $directive->published_on,

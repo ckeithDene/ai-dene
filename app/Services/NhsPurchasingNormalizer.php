@@ -21,9 +21,9 @@ class NhsPurchasingNormalizer
     public function summary(array $raw): array
     {
         return [
-            'summary' => $this->text($raw['summary'] ?? null, 2000),
-            'changes' => $this->text($raw['changes'] ?? null, 2000),
-            'limitations' => $this->text($raw['limitations'] ?? null, 2000),
+            'summary' => $this->text($raw['summary'] ?? null, 6000),
+            'changes' => $this->text($raw['changes'] ?? null, 4000),
+            'limitations' => $this->text($raw['limitations'] ?? null, 4000),
         ];
     }
 
@@ -38,7 +38,7 @@ class NhsPurchasingNormalizer
         }
 
         $title = $this->text($raw['title'] ?? null, 255);
-        $summary = $this->text($raw['summary'] ?? null, 2000);
+        $summary = $this->text($raw['summary'] ?? null, 4000);
 
         if ($title === '') {
             return null;
@@ -70,7 +70,7 @@ class NhsPurchasingNormalizer
             'source_title' => $this->text($raw['source_title'] ?? null, 255) ?: null,
             'source_url' => $url,
             'summary' => $summary !== '' ? $summary : null,
-            'commercial_implications' => $this->text($raw['commercial_implications'] ?? null, 2000) ?: null,
+            'commercial_implications' => $this->text($raw['commercial_implications'] ?? null, 4000) ?: null,
             'confidence' => $url === null ? 'Low' : $this->confidence($raw['confidence'] ?? null),
             'requirement_confirmed' => $confirmed,
         ];
@@ -121,7 +121,7 @@ class NhsPurchasingNormalizer
             'category' => $category !== '' ? $category : null,
             'demand_direction' => $this->direction($raw['demand_direction'] ?? null),
             'timeframe' => $this->timeframe($raw['timeframe'] ?? null),
-            'explanation' => $this->text($raw['explanation'] ?? null, 2000) ?: null,
+            'explanation' => $this->text($raw['explanation'] ?? null, 4000) ?: null,
             'commercial_action' => $this->text($raw['commercial_action'] ?? null, 2000) ?: null,
             'secondary_demand' => $this->text($raw['secondary_demand'] ?? null, 2000) ?: null,
             'sales_proposition' => $this->text($raw['sales_proposition'] ?? null, 2000) ?: null,

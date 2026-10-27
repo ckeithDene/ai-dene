@@ -21,18 +21,25 @@ class NhsPurchasingResearcher
     {
         $notes = $this->request($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
+            'task' => 'Write the full purchasing briefing, including green NHS initiatives and how each one could change purchasing.',
             'existing_directives' => $existing,
         ], true);
         $decoded = $this->decode($notes);
+        $hasDirectives = is_array($decoded) && is_array($decoded['directives'] ?? null) && $decoded['directives'] !== [];
+        $hasOpportunities = is_array($decoded) && is_array($decoded['opportunities'] ?? null) && $decoded['opportunities'] !== [];
 
-        if (! is_array($decoded) || ! is_array($decoded['directives'] ?? null)) {
+        if (! $hasDirectives || ! $hasOpportunities) {
             if (trim($notes) === '') {
                 throw new RuntimeException('ChatGPT did not return any NHS research.');
             }
 
-            $decoded = $this->decode($this->request($aiModel, $this->prompt->structureDirectives(), [
+            $structured = $this->decode($this->request($aiModel, $this->prompt->structureDirectives(), [
                 'research_notes' => mb_substr($notes, 0, 14000),
             ], false));
+
+            if (is_array($structured)) {
+                $decoded = $structured;
+            }
         }
 
         if (! is_array($decoded)) {

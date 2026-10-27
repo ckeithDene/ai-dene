@@ -196,6 +196,12 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                 <flux:card wire:key="nhs-directive-{{ $directive->id }}">
                     <flux:heading>{{ $directive->title }}</flux:heading>
                     <flux:text>{{ collect([$directive->issuer, $directive->published_on, $directive->obligation->label()])->filter()->implode(' · ') }}</flux:text>
+                    @if (filled($directive->summary))
+                        <flux:text>{{ $directive->summary }}</flux:text>
+                    @endif
+                    @if (filled($directive->commercial_implications))
+                        <flux:text>{{ $directive->commercial_implications }}</flux:text>
+                    @endif
                     @if ($directive->source_url)
                         <flux:link :href="$directive->source_url" target="_blank" rel="noopener noreferrer">{{ $directive->source_title ?: __('Source') }}</flux:link>
                     @else

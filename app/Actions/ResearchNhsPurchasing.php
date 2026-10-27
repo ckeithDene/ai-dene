@@ -78,9 +78,15 @@ class ResearchNhsPurchasing
             return new NhsPurchasingResult(0, 0);
         }
 
+        $impact = is_array($research['opportunities'] ?? null) && $research['opportunities'] !== []
+            ? $research
+            : null;
+
         try {
-            $known = NhsProductOpportunity::query()->latest('id')->limit(30)->pluck('name')->all();
-            $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), $known);
+            if ($impact === null) {
+                $known = NhsProductOpportunity::query()->latest('id')->limit(30)->pluck('name')->all();
+                $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), $known);
+            }
         } catch (RuntimeException $exception) {
             $settings->last_ran_at = now();
             $settings->save();
@@ -167,7 +173,7 @@ class ResearchNhsPurchasing
         $directives = NhsDirective::query()->get();
 
         foreach ($items as $item) {
-            if (! is_array($item) || count($saved) >= 20) {
+            if (! is_array($item) || count($saved) >= 30) {
                 continue;
             }
 
@@ -175,6 +181,10 @@ class ResearchNhsPurchasing
             $linked = $directives->filter(fn (NhsDirective $directive): bool => collect($titles)->contains(
                 fn (string $title): bool => $this->titlesMatch($title, $directive->title),
             ));
+
+            if ($linked->isEmpty() && $directives->count() === 1 && $titles === []) {
+                $linked = $directives;
+            }
 
             if ($linked->isEmpty()) {
                 continue;
@@ -292,6 +302,7 @@ class ResearchNhsPurchasing
             'applies_to' => $directive->applies_to,
             'effective_on' => $directive->effective_on,
             'summary' => $directive->summary,
+            'commercial_implications' => $directive->commercial_implications,
             'source_url' => $directive->source_url,
             'requirement_confirmed' => $directive->requirement_confirmed,
         ], $directives);
