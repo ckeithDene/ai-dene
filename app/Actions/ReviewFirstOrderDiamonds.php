@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Data\DiamondCheckResult;
 use App\Data\FirstOrderLead;
 use App\Enums\FirstOrderDiamondStatus;
+use App\Enums\OdooCompany;
 use App\Models\AiModel;
 use App\Models\FirstOrderDiamond;
 use App\Models\OdooConnection;
@@ -24,7 +25,7 @@ class ReviewFirstOrderDiamonds
     {
         set_time_limit(0);
 
-        $connection = OdooConnection::current();
+        $connection = OdooConnection::for(OdooCompany::MidMeds);
         $aiModel = AiModel::current();
 
         if ($connection === null || blank($connection->api_key)) {

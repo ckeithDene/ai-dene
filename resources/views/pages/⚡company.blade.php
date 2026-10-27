@@ -2,6 +2,7 @@
 
 use App\Actions\GenerateSalesStrategy;
 use App\Data\SalesProspect;
+use App\Enums\OdooCompany;
 use App\Enums\ResearchDepth;
 use App\Enums\SalesObjective;
 use App\Enums\SalesStrategyStatus;
@@ -145,7 +146,7 @@ new #[Title('Sales strategy')] class extends Component {
     {
         $spend = $this->prospect->knownSpend;
         $purchases = [];
-        $connection = OdooConnection::current();
+        $connection = OdooConnection::for(OdooCompany::MidMeds);
 
         if ($connection !== null && filled($connection->api_key)) {
             $catalogue = new MidMedsCatalogue;
@@ -213,7 +214,7 @@ new #[Title('Sales strategy')] class extends Component {
     #[Computed]
     public function odooUrl(): ?string
     {
-        $baseUrl = OdooConnection::current()?->url;
+        $baseUrl = OdooConnection::for(OdooCompany::MidMeds)?->url;
 
         if (! is_string($baseUrl) || $baseUrl === '') {
             return null;

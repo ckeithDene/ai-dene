@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Data\BiggestFishLead;
 use App\Data\DiamondCheckResult;
 use App\Enums\CustomerReviewStatus;
+use App\Enums\OdooCompany;
 use App\Models\AiModel;
 use App\Models\BiggestFish;
 use App\Models\FirstOrderDiamond;
@@ -25,7 +26,7 @@ class ReviewBiggestFish
     {
         set_time_limit(0);
 
-        $connection = OdooConnection::current();
+        $connection = OdooConnection::for(OdooCompany::MidMeds);
         $aiModel = AiModel::current();
 
         if ($connection === null || blank($connection->api_key)) {

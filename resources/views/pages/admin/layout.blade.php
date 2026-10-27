@@ -1,7 +1,7 @@
 <div class="flex items-start max-md:flex-col">
     <div class="me-10 w-full pb-4 md:w-[220px]">
         <flux:navlist aria-label="{{ __('Admin') }}">
-            <flux:navlist.item :href="route('admin.odoo')" :current="request()->routeIs('admin.odoo')" wire:navigate>{{ __('Odoo connection') }}</flux:navlist.item>
+            <flux:navlist.item :href="route('admin.odoo')" :current="request()->routeIs('admin.odoo')" wire:navigate>{{ __('Odoo connections') }}</flux:navlist.item>
             <flux:navlist.item :href="route('admin.ai-models')" :current="request()->routeIs('admin.ai-models')" wire:navigate>{{ __('AI Models') }}</flux:navlist.item>
         </flux:navlist>
     </div>

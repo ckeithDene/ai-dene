@@ -13,16 +13,22 @@
             <livewire:team-switcher />
 
             <flux:sidebar.nav>
-                <flux:sidebar.group :heading="__('Platform')" class="grid">
+                <flux:sidebar.group class="grid">
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
                         {{ __('Dashboard') }}
                     </flux:sidebar.item>
+                </flux:sidebar.group>
+
+                <flux:sidebar.group :heading="__('MidMeds')" class="grid">
                     <flux:sidebar.item icon="building-office-2" :href="route('first-order-diamonds')" :current="request()->routeIs('first-order-diamonds')" wire:navigate>
                         {{ __('First Order Diamonds') }}
                     </flux:sidebar.item>
                     <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
                         {{ __('Biggest Fish') }}
                     </flux:sidebar.item>
+                </flux:sidebar.group>
+
+                <flux:sidebar.group :heading="__('Dene Healthcare')" class="grid">
                     <flux:sidebar.item icon="map-pin" :href="route('primary-care-spaces')" :current="request()->routeIs('primary-care-spaces*')" wire:navigate>
                         {{ __('Primary Care Spaces') }}
                     </flux:sidebar.item>
@@ -31,7 +37,7 @@
                 @if (auth()->user()->isAdmin())
                     <flux:sidebar.group :heading="__('Admin')" class="grid">
                         <flux:sidebar.item icon="server" :href="route('admin.odoo')" :current="request()->routeIs('admin.odoo')" wire:navigate>
-                            {{ __('Odoo connection') }}
+                            {{ __('Odoo connections') }}
                         </flux:sidebar.item>
                         <flux:sidebar.item icon="sparkles" :href="route('admin.ai-models')" :current="request()->routeIs('admin.ai-models')" wire:navigate>
                             {{ __('AI Models') }}

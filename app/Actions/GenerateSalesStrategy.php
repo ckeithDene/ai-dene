@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Data\SalesProspect;
+use App\Enums\OdooCompany;
 use App\Enums\SalesStrategyStatus;
 use App\Models\AiModel;
 use App\Models\OdooConnection;
@@ -46,7 +47,7 @@ class GenerateSalesStrategy
         $strategy->failure_reason = null;
         $strategy->save();
 
-        $connection = OdooConnection::current();
+        $connection = OdooConnection::for(OdooCompany::MidMeds);
         $aiModel = AiModel::current();
 
         if ($connection === null || blank($connection->api_key)) {

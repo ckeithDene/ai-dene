@@ -1,5 +1,8 @@
 <?php
 
+use App\Enums\OdooCompany;
+use App\Models\BiggestFish;
+use App\Models\FirstOrderDiamond;
 use App\Models\OdooConnection;
 use App\Models\User;
 use Illuminate\Http\Client\Request;
@@ -366,6 +369,72 @@ test('testing an unsaved odoo connection does not call odoo', function () {
     Http::assertNothingSent();
 
     $this->assertDatabaseEmpty('odoo_connections');
+});
+
+test('the sidebar separates midmeds and dene healthcare', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('dashboard'))
+        ->assertOk()
+        ->assertSeeInOrder(['MidMeds', 'First Order Diamonds', 'Biggest Fish', 'Dene Healthcare', 'Primary Care Spaces']);
+});
+
+test('dene healthcare can be saved beside the midmeds connection', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    OdooConnection::factory()->create([
+        'url' => 'https://midmeds.odoo.com',
+        'database' => 'midmeds',
+        'username' => 'midmeds-admin',
+    ]);
+
+    Http::fake([
+        'https://dene.odoo.com/jsonrpc' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => 3,
+        ]),
+    ]);
+
+    Livewire::test('pages::admin.odoo-connection')
+        ->assertSet('url', 'https://midmeds.odoo.com')
+        ->set('deneUrl', 'https://dene.odoo.com/')
+        ->set('deneDatabase', 'dene')
+        ->set('deneUsername', ' dene-admin ')
+        ->set('deneApiKey', 'dene-key')
+        ->call('saveDene')
+        ->assertHasNoErrors()
+        ->assertSet('deneApiKey', '');
+
+    expect(OdooConnection::query()->count())->toBe(2)
+        ->and(OdooConnection::for(OdooCompany::MidMeds)?->url)->toBe('https://midmeds.odoo.com')
+        ->and(OdooConnection::for(OdooCompany::Dene)?->url)->toBe('https://dene.odoo.com')
+        ->and(OdooConnection::for(OdooCompany::Dene)?->username)->toBe('dene-admin')
+        ->and(OdooConnection::for(OdooCompany::Dene)?->api_key)->toBe('dene-key');
+});
+
+test('midmeds pages keep using the midmeds odoo connection', function () {
+    $this->actingAs(User::factory()->create());
+
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    FirstOrderDiamond::factory()->create([
+        'odoo_order_id' => 44,
+        'company_name' => 'Acme Ltd',
+    ]);
+    BiggestFish::factory()->create([
+        'odoo_partner_id' => 9,
+        'company_name' => 'Big Co',
+    ]);
+
+    $this->get(route('first-order-diamonds'))
+        ->assertOk()
+        ->assertSee('https://midmeds.odoo.com/web#id=44&amp;model=sale.order&amp;view_type=form', false)
+        ->assertDontSee('dene.odoo.com', false);
+
+    $this->get(route('biggest-fish'))
+        ->assertOk()
+        ->assertSee('https://midmeds.odoo.com/web#id=9&amp;model=res.partner&amp;view_type=form', false)
+        ->assertDontSee('dene.odoo.com', false);
 });
 
 test('non-admins cannot test the odoo connection', function () {

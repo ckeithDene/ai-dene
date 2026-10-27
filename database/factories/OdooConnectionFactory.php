@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\OdooCompany;
 use App\Models\OdooConnection;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -18,10 +19,21 @@ class OdooConnectionFactory extends Factory
     public function definition(): array
     {
         return [
+            'company' => OdooCompany::MidMeds,
             'url' => 'https://example.odoo.com',
             'database' => 'example',
             'username' => 'admin',
             'api_key' => 'test-api-key',
         ];
+    }
+
+    /**
+     * Create the Dene Healthcare connection.
+     */
+    public function dene(): static
+    {
+        return $this->state(fn (): array => [
+            'company' => OdooCompany::Dene,
+        ]);
     }
 }

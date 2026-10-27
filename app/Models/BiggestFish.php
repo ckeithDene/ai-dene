@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\CustomerReviewStatus;
+use App\Enums\OdooCompany;
 use Database\Factories\BiggestFishFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -107,7 +108,7 @@ class BiggestFish extends Model
      */
     public function odooPartnerUrl(): ?string
     {
-        $baseUrl = once(fn (): ?string => OdooConnection::current()?->url);
+        $baseUrl = once(fn (): ?string => OdooConnection::for(OdooCompany::MidMeds)?->url);
 
         if (! is_string($baseUrl) || $baseUrl === '') {
             return null;

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OdooCompany;
 use Database\Factories\OdooConnectionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -11,6 +12,7 @@ use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
+ * @property OdooCompany $company
  * @property string $url
  * @property string $database
  * @property string $username
@@ -20,7 +22,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['url', 'database', 'username', 'api_key'])]
+#[Fillable(['company', 'url', 'database', 'username', 'api_key'])]
 #[Hidden(['api_key'])]
 class OdooConnection extends Model
 {
@@ -28,11 +30,19 @@ class OdooConnection extends Model
     use HasFactory;
 
     /**
-     * Get the stored Odoo connection, if one has been saved.
+     * Get the Odoo connection for one company.
+     */
+    public static function for(OdooCompany $company): ?self
+    {
+        return static::query()->where('company', $company)->first();
+    }
+
+    /**
+     * Get the MidMeds Odoo connection.
      */
     public static function current(): ?self
     {
-        return static::query()->oldest('id')->first();
+        return static::for(OdooCompany::MidMeds);
     }
 
     /**
@@ -43,6 +53,7 @@ class OdooConnection extends Model
     protected function casts(): array
     {
         return [
+            'company' => OdooCompany::class,
             'api_key' => 'encrypted',
             'verified_at' => 'datetime',
         ];
