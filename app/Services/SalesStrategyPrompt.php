@@ -29,7 +29,7 @@ class SalesStrategyPrompt
 
         Use "Not publicly verified" when a financial figure is not found. Never present revenue as valuation, invent market share, invent named people, or invent email addresses.
 
-        Choose 4 to 8 short catalogue search phrases for products this company's actual activities may need, such as "nitrile examination gloves" or "couch roll". Do not invent SKUs.
+        Choose 4 to 8 short catalogue search phrases for different product lines this company's operations may need, such as "couch roll", "examination couch", or "sharps bin". Do not use the names of products it has already bought, and do not use another pack size or variation of those products. Do not invent SKUs.
 
         Reply with JSON only, no markdown, using these keys:
         executive_summary, industry, country, company_profile, financial_research, buying_needs, decision_maker_roles, sales_triggers, reason_to_contact, catalogue_search_terms, sources, information_gaps.
@@ -79,9 +79,9 @@ class SalesStrategyPrompt
         {$pricing}
         {$repeat}
         {$pharmaceuticals}
-        Recommend at most {$settings->max_products} products. Prefer recurring consumable demand when the evidence supports it, and say when a recommendation is only a reasonable inference.
+        Recommend at most {$settings->max_products} products. recommended_products are additional product lines this company could buy because of what it does. Do not recommend a product in known_purchases, or another size, pack, or variation of one. Use several catalogue categories when the company's work supports more than one need. Prefer recurring consumable demand when the evidence supports it, and say when a recommendation is only a reasonable inference.
 
-        Keep purchase_probability and account_potential separate. Score product_fit, repeat_purchasing, addressable_spend, win_probability, and strategic_value from 0 to 100. Set total to product_fit × 0.30 + repeat_purchasing × 0.25 + addressable_spend × 0.20 + win_probability × 0.15 + strategic_value × 0.10, rounded to a whole number. research_confidence and priority are High, Medium, or Low. A low research confidence must not be written as a certain forecast. recurring_revenue_scenario must be a labelled scenario, not a forecast, and must not invent order volumes.
+        Keep purchase_probability and account_potential separate, and set both to whole numbers from 0 to 100. An existing customer that already places orders cannot have a purchase probability of 0. Score product_fit, repeat_purchasing, addressable_spend, win_probability, and strategic_value from 0 to 100. Set total to product_fit × 0.30 + repeat_purchasing × 0.25 + addressable_spend × 0.20 + win_probability × 0.15 + strategic_value × 0.10, rounded to a whole number. research_confidence and priority are High, Medium, or Low. A low research confidence must not be written as a certain forecast. recurring_revenue_scenario must be a labelled scenario, not a forecast, and must not invent order volumes.
 
         The initial email should be about 120 to 170 words. The follow-up should be about 60 to 100 words. The telephone script should take about 30 to 45 seconds. The call to action should ask for a conversation, comparison, or quotation.
 

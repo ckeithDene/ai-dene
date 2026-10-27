@@ -9,7 +9,10 @@ use App\Enums\SalesTone;
 use App\Models\OdooConnection;
 use App\Models\SalesEngineSetting;
 use App\Models\SalesStrategy;
+use App\Services\MidMedsCatalogue;
+use App\Services\OdooClient;
 use App\Services\SalesProspectFinder;
+use App\Services\SalesStrategyNormalizer;
 use Flux\Flux;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
@@ -125,6 +128,88 @@ new #[Title('Sales strategy')] class extends Component {
         return SalesStrategy::query()->where('odoo_partner_id', $this->partnerId)->first();
     }
 
+    /**
+     * @param  array<string, mixed>  $score
+     * @return array<string, mixed>
+     */
+    public function presentScores(array $score): array
+    {
+        return (new SalesStrategyNormalizer)->presentScores($score);
+    }
+
+    /**
+     * @return array{spend: string|null, purchases: array<int, mixed>}
+     */
+    #[Computed]
+    public function trading(): array
+    {
+        $spend = $this->prospect->knownSpend;
+        $purchases = [];
+        $connection = OdooConnection::current();
+
+        if ($connection !== null && filled($connection->api_key)) {
+            $catalogue = new MidMedsCatalogue;
+            $client = new OdooClient($connection);
+
+            try {
+                $confirmed = $catalogue->confirmedSpend($client, $this->partnerId);
+
+                if ($confirmed !== null) {
+                    $spend = $confirmed;
+                }
+            } catch (\RuntimeException) {
+                // Keep the spend already known from the lead review.
+            }
+
+            $purchases = $catalogue->purchaseHistory($client, $this->partnerId);
+        }
+
+        if ($purchases === []) {
+            $stored = $this->strategy?->report['supplied_products'] ?? null;
+            $purchases = is_array($stored) ? array_values(array_filter($stored, 'is_array')) : [];
+        }
+
+        return [
+            'spend' => $spend,
+            'purchases' => $purchases,
+        ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $products
+     * @param  array<int, mixed>  $purchases
+     * @return array<int, array<string, mixed>>
+     */
+    public function opportunities(array $products, array $purchases): array
+    {
+        $catalogue = new MidMedsCatalogue;
+        $opportunities = [];
+
+        foreach ($products as $product) {
+            if (! is_array($product)) {
+                continue;
+            }
+
+            $name = is_string($product['name'] ?? null) ? $product['name'] : '';
+            $supplied = false;
+
+            foreach ($purchases as $purchase) {
+                $purchasedName = is_array($purchase) && is_string($purchase['name'] ?? null) ? $purchase['name'] : '';
+
+                if ($catalogue->sameProductLine($name, $purchasedName)) {
+                    $supplied = true;
+                    break;
+                }
+            }
+
+            if (! $supplied) {
+                $opportunities[] = $product;
+            }
+        }
+
+        return $opportunities;
+    }
+
     #[Computed]
     public function odooUrl(): ?string
     {
@@ -151,6 +236,9 @@ new #[Title('Sales strategy')] class extends Component {
         $materials = is_array($report['sales_materials'] ?? null) ? $report['sales_materials'] : [];
         $next = is_array($report['next_action'] ?? null) ? $report['next_action'] : [];
         $products = is_array($report['recommended_products'] ?? null) ? $report['recommended_products'] : [];
+        $trading = $this->trading;
+        $opportunities = $this->opportunities($products, $trading['purchases']);
+        $score = $this->presentScores($score);
         $priority = is_string($score['priority'] ?? null) ? $score['priority'] : '';
         $initialEmail = is_array($materials['initial_email'] ?? null) ? $materials['initial_email'] : [];
         $followUp = is_array($materials['follow_up_email'] ?? null) ? $materials['follow_up_email'] : [];
@@ -196,7 +284,7 @@ new #[Title('Sales strategy')] class extends Component {
         </div>
         <div>
             <flux:text class="text-zinc-500">{{ __('Spent with MidMeds') }}</flux:text>
-            <flux:heading>{{ $prospect->knownSpend ?: __('No confirmed total yet') }}</flux:heading>
+            <flux:heading>{{ $trading['spend'] ?: __('No confirmed total yet') }}</flux:heading>
         </div>
         <div>
             <flux:text class="text-zinc-500">{{ __('Company size') }}</flux:text>
@@ -234,18 +322,40 @@ new #[Title('Sales strategy')] class extends Component {
                 <div>
                     <flux:text class="text-zinc-500">{{ __('Purchase probability') }}</flux:text>
                     <flux:heading>{{ (int) ($score['purchase_probability'] ?? 0) }}/100</flux:heading>
+                    @if ($score['purchase_probability_estimated'] ?? false)
+                        <flux:text>{{ __('Estimated from the other scores.') }}</flux:text>
+                    @endif
                 </div>
                 <div>
                     <flux:text class="text-zinc-500">{{ __('Account potential') }}</flux:text>
                     <flux:heading>{{ (int) ($score['account_potential'] ?? 0) }}/100</flux:heading>
+                    @if ($score['account_potential_estimated'] ?? false)
+                        <flux:text>{{ __('Estimated from the other scores.') }}</flux:text>
+                    @endif
                 </div>
             </div>
 
-            @if ($products !== [])
+            @if ($trading['purchases'] !== [])
                 <div>
-                    <flux:heading>{{ __('Suggested products') }}</flux:heading>
+                    <flux:heading>{{ __('Already supplied') }}</flux:heading>
                     <div class="mt-3 grid gap-3 md:grid-cols-2">
-                        @foreach (array_slice($products, 0, 4) as $product)
+                        @foreach ($trading['purchases'] as $purchase)
+                            @if (is_array($purchase) && filled($purchase['name'] ?? null))
+                                <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+                                    <flux:heading>{{ $purchase['name'] }}</flux:heading>
+                                    <flux:text>{{ __('Ordered') }} @if (filled($purchase['quantity'] ?? null)) · {{ $purchase['quantity'] }} @endif @if (filled($purchase['spent'] ?? null)) · {{ $purchase['spent'] }} @endif</flux:text>
+                                </div>
+                            @endif
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
+            @if ($opportunities !== [])
+                <div>
+                    <flux:heading>{{ __('Could also sell') }}</flux:heading>
+                    <div class="mt-3 grid gap-3 md:grid-cols-2">
+                        @foreach (array_slice($opportunities, 0, 4) as $product)
                             @if (is_array($product))
                                 <div class="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700" wire:key="suggested-{{ $product['odoo_product_id'] ?? $loop->index }}">
                                     <flux:heading>{{ $product['name'] ?? '' }}</flux:heading>
@@ -255,6 +365,8 @@ new #[Title('Sales strategy')] class extends Component {
                         @endforeach
                     </div>
                 </div>
+            @elseif ($products !== [])
+                <flux:text>{{ __('The current suggestions repeat products already supplied. Generate the strategy again to look for other catalogue lines.') }}</flux:text>
             @endif
 
             @if (filled($report['strategy_summary'] ?? null))
@@ -315,12 +427,12 @@ new #[Title('Sales strategy')] class extends Component {
             @endif
         </flux:card>
 
-        @if ($products !== [])
+        @if ($opportunities !== [])
             <flux:card class="flex flex-col gap-4">
-                <flux:heading size="lg">{{ __('Catalogue matches') }}</flux:heading>
-                <flux:text>{{ __('These products were read from the MidMeds catalogue in Odoo. Pharmaceutical supply still needs eligibility checks and account approval.') }}</flux:text>
+                <flux:heading size="lg">{{ __('Could also sell') }}</flux:heading>
+                <flux:text>{{ __('These are other MidMeds catalogue lines that fit what the company does. They are not another pack or size of a product already supplied. Pharmaceutical supply still needs eligibility checks and account approval.') }}</flux:text>
                 <div class="grid gap-4">
-                    @foreach ($products as $product)
+                    @foreach ($opportunities as $product)
                         @if (is_array($product))
                             <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700" wire:key="product-{{ $product['odoo_product_id'] ?? $loop->index }}">
                                 <div class="flex flex-wrap items-start justify-between gap-2">

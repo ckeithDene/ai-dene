@@ -78,9 +78,16 @@ test('a sales strategy uses the odoo catalogue and can reuse the company researc
         ->call('generate')
         ->assertSee('Harbour Clinics')
         ->assertSee('86/100')
+        ->assertSee('72/100')
+        ->assertSee('62/100')
+        ->assertSee('£1,500.00')
+        ->assertSee('Already supplied')
         ->assertSee('Nitrile examination gloves')
-        ->assertSee('GLV-100')
-        ->assertSee('£4.50')
+        ->assertSee('Could also sell')
+        ->assertSee('Couch roll')
+        ->assertSee('COUCH-1')
+        ->assertSee('£6.00')
+        ->assertDontSee('GLV-100')
         ->assertSee('Compare the gloves the clinics already use.')
         ->assertSee('Scenario, not a forecast.')
         ->assertDontSee('FAKE-999')
@@ -99,9 +106,10 @@ test('a sales strategy uses the odoo catalogue and can reuse the company researc
         ->and($settings->max_products)->toBe(4)
         ->and($searches)->toBe(1)
         ->and($strategyCalls)->toBe(2)
-        ->and($strategyRequest[0]->data()['input'])->toContain('GLV-100')
+        ->and($strategyRequest[0]->data()['input'])->toContain('COUCH-1')
+        ->and($strategyRequest[0]->data()['input'])->not->toContain('GLV-100')
         ->and($strategyRequest[0]->data()['input'])->not->toContain('Amoxicillin')
-        ->and($strategyRequest[0]->data()['instructions'])->toContain('Prioritise repeat consumable orders');
+        ->and($strategyRequest[0]->data()['instructions'])->toContain('additional product lines');
 });
 
 test('non-admins can read a company page but cannot generate a strategy', function () {
@@ -191,10 +199,10 @@ function salesStrategyReport(string $opening): array
                 'evidence' => 'None',
             ],
             [
-                'odoo_product_id' => 55,
-                'sku' => 'GLV-100',
+                'odoo_product_id' => 88,
+                'sku' => 'COUCH-1',
                 'use' => 'Examination rooms',
-                'reason' => 'Clinics use gloves daily.',
+                'reason' => 'Clinics use couch roll daily.',
                 'frequency' => 'Monthly',
                 'repeat_order' => true,
                 'confidence' => 'High',
@@ -209,8 +217,6 @@ function salesStrategyReport(string $opening): array
             'addressable_spend' => 70,
             'win_probability' => 60,
             'strategic_value' => 50,
-            'purchase_probability' => 62,
-            'account_potential' => 74,
             'research_confidence' => 'Medium',
             'priority' => 'High',
             'rationale' => 'The clinics buy consumables more often than equipment.',
@@ -256,7 +262,7 @@ function salesStrategyReport(string $opening): array
             'decision_maker' => 'Procurement Manager',
             'channel' => 'Email',
             'opening_proposition' => 'Compare current glove pricing.',
-            'first_products' => 'GLV-100',
+            'first_products' => 'COUCH-1',
             'next_step' => 'Send a short comparison.',
             'missing_facts' => ['Monthly glove volume'],
         ],
@@ -277,6 +283,24 @@ function salesStrategyOdoo(Request $request): PromiseInterface
 
     $call = $params['args'] ?? [];
     $model = $call[3] ?? null;
+    $method = $call[4] ?? null;
+
+    if ($method === 'read_group') {
+        return Http::response(['result' => [[
+            'amount_total' => 1500,
+            'currency_id' => [1, 'GBP'],
+        ]]]);
+    }
+
+    if ($model === 'sale.order.line') {
+        return Http::response(['result' => [[
+            'id' => 1,
+            'name' => 'Nitrile examination gloves',
+            'product_id' => [55, 'Nitrile examination gloves'],
+            'product_uom_qty' => 4,
+            'price_subtotal' => 18,
+        ]]]);
+    }
 
     if ($model === 'product.category') {
         return Http::response(['result' => [
@@ -295,6 +319,15 @@ function salesStrategyOdoo(Request $request): PromiseInterface
                 'categ_id' => [1, 'Consumables'],
                 'qty_available' => 25,
                 'description_sale' => 'Examination gloves',
+                'website_url' => false,
+            ],
+            [
+                'id' => 88,
+                'name' => 'Couch roll',
+                'default_code' => 'COUCH-1',
+                'list_price' => 6,
+                'categ_id' => [3, 'Infection control'],
+                'description_sale' => 'Couch roll',
                 'website_url' => false,
             ],
             [

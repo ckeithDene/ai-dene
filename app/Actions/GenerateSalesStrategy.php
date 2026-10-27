@@ -79,6 +79,8 @@ class GenerateSalesStrategy
             $products = $this->catalogue->products(
                 $client,
                 $this->searchTerms($research),
+                $categories,
+                array_column($purchases, 'name'),
                 max($settings->max_products * 3, $settings->max_products),
                 $settings->evaluate_pharmaceuticals,
             );
@@ -88,7 +90,9 @@ class GenerateSalesStrategy
 
         try {
             $report = $this->strategist->strategy($aiModel, $prospect, $settings, $research, $products, $purchases);
-            $strategy->report = $this->normalizer->report($report, $products, $research, $settings->max_products);
+            $report = $this->normalizer->report($report, $products, $research, $settings->max_products);
+            $report['supplied_products'] = $purchases;
+            $strategy->report = $report;
             $strategy->status = SalesStrategyStatus::Complete;
             $strategy->failure_reason = null;
             $strategy->generated_at = now();

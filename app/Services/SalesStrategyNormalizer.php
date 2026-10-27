@@ -22,7 +22,7 @@ class SalesStrategyNormalizer
         $financials = $this->object($raw['financial_research'] ?? null);
         $researchProfile = $this->object($research['company_profile'] ?? null);
         $researchFinancials = $this->object($research['financial_research'] ?? null);
-        $score = $this->object($raw['opportunity_score'] ?? null);
+        $score = $this->presentScores($this->object($raw['opportunity_score'] ?? null));
         $strategy = $this->object($raw['sales_strategy'] ?? null);
         $plan = $this->object($raw['account_growth_plan'] ?? null);
         $materials = $this->object($raw['sales_materials'] ?? null);
@@ -57,14 +57,16 @@ class SalesStrategyNormalizer
             'buying_needs' => $this->lines($raw['buying_needs'] ?? $research['buying_needs'] ?? null, 8, 300),
             'recommended_products' => $products,
             'opportunity_score' => [
-                'total' => $this->score($score['total'] ?? null),
-                'product_fit' => $this->score($score['product_fit'] ?? null),
-                'repeat_purchasing' => $this->score($score['repeat_purchasing'] ?? null),
-                'addressable_spend' => $this->score($score['addressable_spend'] ?? null),
-                'win_probability' => $this->score($score['win_probability'] ?? null),
-                'strategic_value' => $this->score($score['strategic_value'] ?? null),
-                'purchase_probability' => $this->score($score['purchase_probability'] ?? null),
-                'account_potential' => $this->score($score['account_potential'] ?? null),
+                'total' => $score['total'],
+                'product_fit' => $score['product_fit'],
+                'repeat_purchasing' => $score['repeat_purchasing'],
+                'addressable_spend' => $score['addressable_spend'],
+                'win_probability' => $score['win_probability'],
+                'strategic_value' => $score['strategic_value'],
+                'purchase_probability' => $score['purchase_probability'],
+                'account_potential' => $score['account_potential'],
+                'purchase_probability_estimated' => $score['purchase_probability_estimated'],
+                'account_potential_estimated' => $score['account_potential_estimated'],
                 'research_confidence' => $this->rating($score['research_confidence'] ?? null),
                 'priority' => $this->rating($score['priority'] ?? null),
                 'rationale' => $this->text($score['rationale'] ?? null, 1500),
@@ -106,6 +108,57 @@ class SalesStrategyNormalizer
             'information_gaps' => $this->lines($raw['information_gaps'] ?? $research['information_gaps'] ?? null, 8, 300),
             'sales_triggers' => $this->lines($research['sales_triggers'] ?? null, 6, 300),
         ];
+    }
+
+    /**
+     * Fill purchase probability and account potential when the model left them blank.
+     *
+     * @param  array<string, mixed>  $score
+     * @return array<string, mixed>
+     */
+    public function presentScores(array $score): array
+    {
+        $fit = $this->score($score['product_fit'] ?? null);
+        $repeat = $this->score($score['repeat_purchasing'] ?? null);
+        $spend = $this->score($score['addressable_spend'] ?? null);
+        $win = $this->score($score['win_probability'] ?? null);
+        $strategic = $this->score($score['strategic_value'] ?? null);
+        $purchase = $this->scoreOrNull($score['purchase_probability'] ?? null);
+        $potential = $this->scoreOrNull($score['account_potential'] ?? null);
+        $total = $this->scoreOrNull($score['total'] ?? null);
+        $purchaseEstimated = ($score['purchase_probability_estimated'] ?? false) === true;
+        $potentialEstimated = ($score['account_potential_estimated'] ?? false) === true;
+
+        if ($purchaseEstimated) {
+            $purchase = $this->score($score['purchase_probability'] ?? null);
+        } elseif ($purchase === null || ($purchase === 0 && ($win > 0 || $fit > 0))) {
+            $purchase = (int) round(($win * 0.6) + ($fit * 0.4));
+            $purchaseEstimated = true;
+        }
+
+        if ($potentialEstimated) {
+            $potential = $this->score($score['account_potential'] ?? null);
+        } elseif ($potential === null || ($potential === 0 && ($spend > 0 || $strategic > 0))) {
+            $potential = (int) round(($spend * 0.6) + ($strategic * 0.4));
+            $potentialEstimated = true;
+        }
+
+        if ($total === null || ($total === 0 && ($fit + $repeat + $spend + $win + $strategic) > 0)) {
+            $total = (int) round(($fit * 0.30) + ($repeat * 0.25) + ($spend * 0.20) + ($win * 0.15) + ($strategic * 0.10));
+        }
+
+        $score['total'] = $total;
+        $score['product_fit'] = $fit;
+        $score['repeat_purchasing'] = $repeat;
+        $score['addressable_spend'] = $spend;
+        $score['win_probability'] = $win;
+        $score['strategic_value'] = $strategic;
+        $score['purchase_probability'] = $purchase;
+        $score['account_potential'] = $potential;
+        $score['purchase_probability_estimated'] = $purchaseEstimated;
+        $score['account_potential_estimated'] = $potentialEstimated;
+
+        return $score;
     }
 
     /**
@@ -310,8 +363,23 @@ class SalesStrategyNormalizer
 
     private function score(mixed $value): int
     {
+        return $this->scoreOrNull($value) ?? 0;
+    }
+
+    private function scoreOrNull(mixed $value): ?int
+    {
+        if (is_string($value)) {
+            $rating = strtolower(trim($value));
+            $value = match ($rating) {
+                'high' => 75,
+                'medium' => 50,
+                'low' => 25,
+                default => $value,
+            };
+        }
+
         if (! is_int($value) && ! is_float($value) && ! is_numeric($value)) {
-            return 0;
+            return null;
         }
 
         return max(0, min(100, (int) round((float) $value)));
