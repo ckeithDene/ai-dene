@@ -21,7 +21,7 @@ class NhsPurchasingResearcher
     {
         $notes = $this->request($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
-            'task' => 'Write the full purchasing briefing, including green NHS initiatives and how each one could change purchasing.',
+            'task' => 'Search official NHS sources for current directives and trends that could change purchasing, then explain which product categories may be bought more or less.',
             'existing_directives' => $existing,
         ], true);
         $decoded = $this->decode($notes);

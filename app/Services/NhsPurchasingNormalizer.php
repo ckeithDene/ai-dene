@@ -122,6 +122,7 @@ class NhsPurchasingNormalizer
             'demand_direction' => $this->direction($raw['demand_direction'] ?? null),
             'timeframe' => $this->timeframe($raw['timeframe'] ?? null),
             'explanation' => $this->text($raw['explanation'] ?? null, 4000) ?: null,
+            'rationale' => $this->text($raw['rationale'] ?? null, 255) ?: null,
             'commercial_action' => $this->text($raw['commercial_action'] ?? null, 2000) ?: null,
             'secondary_demand' => $this->text($raw['secondary_demand'] ?? null, 2000) ?: null,
             'sales_proposition' => $this->text($raw['sales_proposition'] ?? null, 2000) ?: null,

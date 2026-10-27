@@ -32,4 +32,22 @@ enum NhsDemandDirection: string
     {
         return $this === self::StrongDecrease || $this === self::ModerateDecrease;
     }
+
+    public function outlookLabel(): string
+    {
+        return match (true) {
+            $this->isGrowth() => __('Opportunity'),
+            $this->isDecline() => __('Pressure'),
+            default => $this->label(),
+        };
+    }
+
+    public function outlookOrder(): int
+    {
+        return match (true) {
+            $this->isGrowth() => 0,
+            $this->isDecline() => 1,
+            default => 2,
+        };
+    }
 }

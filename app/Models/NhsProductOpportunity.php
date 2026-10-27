@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property NhsDemandDirection $demand_direction
  * @property NhsTimeframe|null $timeframe
  * @property string|null $explanation
+ * @property string|null $rationale
  * @property string|null $commercial_action
  * @property string|null $secondary_demand
  * @property string|null $sales_proposition
@@ -34,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'demand_direction',
     'timeframe',
     'explanation',
+    'rationale',
     'commercial_action',
     'secondary_demand',
     'sales_proposition',
@@ -73,6 +75,23 @@ class NhsProductOpportunity extends Model
             $this->opportunity_score >= 40 => __('Monitor'),
             default => __('Low priority'),
         };
+    }
+
+    public function outlookRationale(): string
+    {
+        $rationale = trim((string) $this->rationale);
+
+        if ($rationale !== '') {
+            return $rationale;
+        }
+
+        $action = trim((string) $this->commercial_action);
+
+        if ($action !== '') {
+            return $action;
+        }
+
+        return trim((string) $this->explanation);
     }
 
     public function directionLabel(): string

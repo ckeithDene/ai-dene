@@ -84,6 +84,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
                             'demand_direction' => 'moderate_increase',
                             'timeframe' => 'medium',
                             'explanation' => 'Practices may look for lower-plastic couch roll as reporting begins.',
+                            'rationale' => 'Net zero and product footprinting',
                             'commercial_action' => 'Compare the current couch roll with lower-plastic alternatives.',
                             'secondary_demand' => 'Waste segregation bags',
                             'sales_proposition' => 'Show practices the couch roll already supplied and ask what they want to change.',
@@ -99,6 +100,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
                             'demand_direction' => 'moderate_decrease',
                             'timeframe' => 'long',
                             'explanation' => 'Some disposable aprons may be bought less often if reusable alternatives are adopted.',
+                            'rationale' => 'Potential replacement where clinically appropriate',
                             'commercial_action' => 'Monitor before removing any apron from the range.',
                             'opportunity_score' => 40,
                             'confidence' => 'Low',
@@ -166,7 +168,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
 
     Livewire::test('pages::nhs-purchasing-patterns')
         ->call('run')
-        ->assertSeeInOrder(['Reduced-plastic couch roll', 'Single-use plastic aprons'])
+        ->assertSeeInOrder(['Product category', 'Expected direction', 'Rationale', 'Reduced-plastic couch roll', 'Opportunity', 'Net zero and product footprinting', 'Single-use plastic aprons', 'Pressure', 'Potential replacement where clinically appropriate'])
         ->assertSee('78/100')
         ->assertSee('Predicted commercial opportunity. This is not confirmation that a GP practice must buy this product.')
         ->assertSee('Partially covered')

@@ -38,7 +38,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
 
         $result = $research->handle();
         $this->resetPage();
-        unset($this->opportunities, $this->directives, $this->counts, $this->settings);
+        unset($this->opportunities, $this->outlook, $this->directives, $this->counts, $this->settings);
 
         if ($result->skippedReason !== null) {
             Flux::toast(variant: 'danger', text: $result->skippedReason);
@@ -94,6 +94,40 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     }
 
     /**
+     * @return Collection<int, NhsProductOpportunity>
+     */
+    #[Computed]
+    public function outlook(): Collection
+    {
+        return NhsProductOpportunity::query()
+            ->when($this->view === 'growth', fn (Builder $query) => $query->whereIn('demand_direction', [
+                NhsDemandDirection::StrongIncrease,
+                NhsDemandDirection::ModerateIncrease,
+            ]))
+            ->when($this->view === 'decline', fn (Builder $query) => $query->whereIn('demand_direction', [
+                NhsDemandDirection::StrongDecrease,
+                NhsDemandDirection::ModerateDecrease,
+            ]))
+            ->get()
+            ->sort(function (NhsProductOpportunity $left, NhsProductOpportunity $right): int {
+                $rank = $left->demand_direction->outlookOrder() <=> $right->demand_direction->outlookOrder();
+
+                if ($rank !== 0) {
+                    return $rank;
+                }
+
+                $score = $right->opportunity_score <=> $left->opportunity_score;
+
+                if ($score !== 0) {
+                    return $score;
+                }
+
+                return $left->name <=> $right->name;
+            })
+            ->values();
+    }
+
+    /**
      * @return Collection<int, NhsDirective>
      */
     #[Computed]
@@ -116,6 +150,34 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
             <flux:subheading>{{ __('NHS directives and guidance, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
         </div>
     </div>
+
+    @if ($this->outlook->isNotEmpty())
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column>{{ __('Product category') }}</flux:table.column>
+                <flux:table.column>{{ __('Expected direction') }}</flux:table.column>
+                <flux:table.column>{{ __('Rationale') }}</flux:table.column>
+            </flux:table.columns>
+            <flux:table.rows>
+                @foreach ($this->outlook as $row)
+                    <flux:table.row wire:key="nhs-outlook-{{ $row->id }}">
+                        <flux:table.cell variant="strong">{{ $row->name }}</flux:table.cell>
+                        <flux:table.cell>
+                            @if ($row->demand_direction->isGrowth())
+                                <span class="inline-flex items-center gap-1.5 font-medium text-green-600 dark:text-green-400">↗ {{ $row->demand_direction->outlookLabel() }}</span>
+                            @elseif ($row->demand_direction->isDecline())
+                                <span class="inline-flex items-center gap-1.5 font-medium text-orange-600 dark:text-orange-400">– {{ $row->demand_direction->outlookLabel() }}</span>
+                            @else
+                                <span class="font-medium text-zinc-500">{{ $row->demand_direction->outlookLabel() }}</span>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell class="whitespace-normal">{{ $row->outlookRationale() }}</flux:table.cell>
+                    </flux:table.row>
+                @endforeach
+            </flux:table.rows>
+        </flux:table>
+        <flux:text>{{ __('This is a predicted purchasing effect from the latest NHS source check. It is not evidence that spending has already changed, and it is not a confirmed order.') }}</flux:text>
+    @endif
 
     @if (filled($this->settings->last_summary))
         <flux:callout :heading="__('Research summary')" :text="$this->settings->last_summary" />
