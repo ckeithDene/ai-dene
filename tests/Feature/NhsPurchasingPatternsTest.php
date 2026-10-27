@@ -19,6 +19,9 @@ beforeEach(function () {
 test('guests are redirected to the login page', function () {
     $this->get(route('nhs-purchasing-patterns'))
         ->assertRedirect(route('login'));
+
+    $this->get(route('nhs-purchasing-patterns.directives.show', 1))
+        ->assertRedirect(route('login'));
 });
 
 test('the page explains when no purchasing patterns have been found', function () {
@@ -57,7 +60,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
                             'gap_score' => 64,
                             'recommendation' => 'Offer the couch roll already in the catalogue and look for lower-plastic alternatives.',
                             'missing_items' => 'Lower-plastic couch roll alternatives',
-                            'matched_skus' => ['FAKE-999', 'COUCH-1'],
+                            'matched_skus' => ['FAKE-999', 'COUCH-1', 'FIT-1'],
                         ],
                         [
                             'opportunity_name' => 'Single-use plastic aprons',
@@ -177,6 +180,8 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->assertSee('https://www.england.nhs.uk/carbon-reporting')
         ->assertSee('The rule does not order them to replace stock.')
         ->assertSee('Design for Life roadmap')
+        ->assertSee('View purchasing impact')
+        ->assertSee(route('nhs-purchasing-patterns.directives.show', NhsDirective::query()->where('title', 'NHS carbon reporting')->first()), false)
         ->assertSee('Source link not found')
         ->assertSee('One GP-relevant reporting change.')
         ->assertDontSee('Trust estates standard')
@@ -199,13 +204,29 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'midmeds.odoo.com')))->toBeFalse()
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'dene.odoo.com')))->toBeTrue();
 
-    $this->get(route('nhs-purchasing-patterns.show', NhsProductOpportunity::query()->where('name', 'Reduced-plastic couch roll')->first()))
+    $pattern = NhsProductOpportunity::query()->where('name', 'Reduced-plastic couch roll')->first();
+
+    $this->get(route('nhs-purchasing-patterns.show', $pattern))
         ->assertOk()
+        ->assertSee('What to push')
+        ->assertSee('Show practices the couch roll already supplied and ask what they want to change.')
+        ->assertSee('Products that could benefit')
         ->assertSee('Couch roll')
         ->assertSee('COUCH-1')
         ->assertSee('£6.00')
+        ->assertSee('Services that could help')
+        ->assertSee('Consultation room fit-out')
+        ->assertSee('FIT-1')
         ->assertSee('Lower-plastic couch roll alternatives')
         ->assertDontSee('FAKE-999');
+
+    $this->get(route('nhs-purchasing-patterns.directives.show', NhsDirective::query()->where('title', 'NHS carbon reporting')->first()))
+        ->assertOk()
+        ->assertSee('Potential impact on GP purchasing')
+        ->assertSee('The rule does not order them to replace stock.')
+        ->assertSee('Reduced-plastic couch roll')
+        ->assertSee('Couch roll')
+        ->assertSee('Consultation room fit-out');
 });
 
 test('catalogue matching waits until the dene connection exists', function () {
@@ -353,6 +374,30 @@ function nhsPurchasingOdoo(Request $request): PromiseInterface
         return Http::response(['result' => 7]);
     }
 
+    $domain = $params['args'][5][0] ?? [];
+    $serviceOnly = false;
+
+    if (is_array($domain)) {
+        foreach ($domain as $clause) {
+            if (is_array($clause) && ($clause[0] ?? null) === 'type' && ($clause[1] ?? null) === '=' && ($clause[2] ?? null) === 'service') {
+                $serviceOnly = true;
+            }
+        }
+    }
+
+    if ($serviceOnly) {
+        return Http::response([
+            'result' => [[
+                'id' => 91,
+                'name' => 'Consultation room fit-out',
+                'default_code' => 'FIT-1',
+                'list_price' => 1200,
+                'categ_id' => [4, 'Services'],
+                'type' => 'service',
+            ]],
+        ]);
+    }
+
     return Http::response([
         'result' => [[
             'id' => 88,
@@ -360,6 +405,7 @@ function nhsPurchasingOdoo(Request $request): PromiseInterface
             'default_code' => 'COUCH-1',
             'list_price' => 6,
             'categ_id' => [3, 'Infection control'],
+            'type' => 'consu',
         ]],
     ]);
 }

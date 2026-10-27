@@ -233,16 +233,48 @@ class ResearchNhsPurchasing
             $limitation = 'Catalogue matching required. Connect the Dene Healthcare Odoo connection to compare these opportunities with the catalogue.';
         } else {
             try {
+                $client = new OdooClient($connection);
                 $terms = [];
 
                 foreach ($opportunities as $opportunity) {
                     foreach ($opportunity->search_terms ?? [] as $term) {
                         $terms[] = $term;
                     }
+
+                    $terms[] = $opportunity->name;
                 }
 
-                $products = $this->catalogue->products(new OdooClient($connection), $terms);
-                $searched = true;
+                try {
+                    $targeted = $this->catalogue->products($client, $terms);
+                    $searched = true;
+                } catch (RuntimeException) {
+                    $targeted = [];
+                    $limitation = 'Could not read the Dene Healthcare catalogue from Odoo.';
+                }
+
+                try {
+                    $sample = $this->catalogue->sample($client);
+                    $searched = true;
+                    $limitation = null;
+                } catch (RuntimeException) {
+                    $sample = [];
+
+                    if (! $searched) {
+                        $limitation = 'Could not read the Dene Healthcare catalogue from Odoo.';
+                    }
+                }
+
+                foreach ([$targeted, $sample] as $list) {
+                    foreach ($list as $product) {
+                        $products[$product->id] = $product;
+
+                        if (count($products) >= 60) {
+                            break 2;
+                        }
+                    }
+                }
+
+                $products = array_values($products);
             } catch (RuntimeException) {
                 $limitation = 'Could not read the Dene Healthcare catalogue from Odoo.';
             }
@@ -276,8 +308,9 @@ class ResearchNhsPurchasing
         }
 
         foreach ($opportunities as $opportunity) {
-            $found = $searched ? $this->normalizer->matchingProducts($opportunity, $products) : [];
             $raw = $gaps[strtolower($opportunity->name)] ?? [];
+            $picked = $this->normalizer->selectedProducts($raw, $products);
+            $found = $picked !== [] ? $picked : ($searched ? $this->normalizer->matchingProducts($opportunity, $products) : []);
             $normalized = $this->normalizer->gap($raw, $found, $searched);
             $gap = NhsCatalogueGap::query()->firstOrNew([
                 'nhs_product_opportunity_id' => $opportunity->id,

@@ -77,6 +77,19 @@ class NhsProductOpportunity extends Model
         };
     }
 
+    public function pushText(): string
+    {
+        foreach ([$this->sales_proposition, $this->commercial_action] as $text) {
+            $text = trim((string) $text);
+
+            if ($text !== '') {
+                return $text;
+            }
+        }
+
+        return '';
+    }
+
     public function outlookRationale(): string
     {
         $rationale = trim((string) $this->rationale);

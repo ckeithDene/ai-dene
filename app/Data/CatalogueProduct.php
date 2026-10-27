@@ -14,6 +14,7 @@ final class CatalogueProduct
         public ?float $available,
         public string $description,
         public bool $pharmaceutical,
+        public bool $service = false,
     ) {}
 
     /**
@@ -30,6 +31,7 @@ final class CatalogueProduct
             'catalogue_url' => $this->url,
             'quantity_available' => $this->available,
             'description' => $this->description,
+            'service' => $this->service,
         ];
     }
 }

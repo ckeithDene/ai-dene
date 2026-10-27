@@ -134,6 +134,35 @@ class NhsPurchasingNormalizer
     }
 
     /**
+     * Keep catalogue rows the model selected by SKU.
+     *
+     * @param  array<string, mixed>  $raw
+     * @param  array<int, CatalogueProduct>  $products
+     * @return array<int, CatalogueProduct>
+     */
+    public function selectedProducts(array $raw, array $products): array
+    {
+        $wanted = [];
+
+        foreach (is_array($raw['matched_skus'] ?? null) ? $raw['matched_skus'] : [] as $sku) {
+            if (is_string($sku) || is_numeric($sku)) {
+                $wanted[] = strtolower(trim((string) $sku));
+            }
+        }
+
+        $wanted = array_values(array_filter($wanted));
+        $matched = [];
+
+        foreach ($products as $product) {
+            if ($product->sku !== '' && in_array(strtolower($product->sku), $wanted, true)) {
+                $matched[$product->id] = $product;
+            }
+        }
+
+        return array_values($matched);
+    }
+
+    /**
      * Keep catalogue rows that match this opportunity's search phrases.
      *
      * @param  array<int, CatalogueProduct>  $catalogue
@@ -193,6 +222,7 @@ class NhsPurchasingNormalizer
                 'name' => $product->name,
                 'category' => $product->category,
                 'list_price' => $product->listPrice,
+                'service' => $product->service,
             ], $products),
         ];
     }

@@ -43,6 +43,44 @@ class NhsCatalogueGap extends Model
     }
 
     /**
+     * Catalogue products, excluding services.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function goods(): array
+    {
+        return $this->catalogueRows(false);
+    }
+
+    /**
+     * Catalogue services.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function services(): array
+    {
+        return $this->catalogueRows(true);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function catalogueRows(bool $services): array
+    {
+        $rows = [];
+
+        foreach ($this->matched_products ?? [] as $product) {
+            if ((bool) ($product['service'] ?? false) !== $services) {
+                continue;
+            }
+
+            $rows[] = $product;
+        }
+
+        return $rows;
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

@@ -9,6 +9,48 @@ use RuntimeException;
 class DeneCatalogue
 {
     /**
+     * Read a sample of products and services sold by Dene Healthcare.
+     *
+     * @return array<int, CatalogueProduct>
+     */
+    public function sample(OdooClient $client): array
+    {
+        $products = [];
+
+        try {
+            $goods = $this->rows($client, [
+                '&',
+                ['sale_ok', '=', true],
+                ['type', '!=', 'service'],
+            ], $this->fields(), 40);
+        } catch (RuntimeException) {
+            $goods = $this->rows($client, [
+                ['sale_ok', '=', true],
+            ], ['name', 'default_code', 'list_price', 'categ_id'], 40);
+        }
+
+        foreach ($goods as $row) {
+            $this->remember($products, $row);
+        }
+
+        try {
+            $services = $this->rows($client, [
+                '&',
+                ['sale_ok', '=', true],
+                ['type', '=', 'service'],
+            ], $this->fields(), 20);
+        } catch (RuntimeException) {
+            $services = [];
+        }
+
+        foreach ($services as $row) {
+            $this->remember($products, $row, true);
+        }
+
+        return array_values($products);
+    }
+
+    /**
      * Search the Dene Healthcare catalogue for the supplied phrases.
      *
      * @param  array<int, string>  $terms
@@ -18,17 +60,25 @@ class DeneCatalogue
     {
         $products = [];
 
-        foreach (array_slice(array_values(array_unique($terms)), 0, 8) as $term) {
-            foreach ($this->search($client, $term) as $row) {
-                $product = $this->product($row);
+        foreach ($this->queries($terms) as $term) {
+            $domain = [
+                '&',
+                ['sale_ok', '=', true],
+                '|',
+                ['name', 'ilike', $term],
+                ['default_code', 'ilike', $term],
+            ];
 
-                if ($product === null || isset($products[$product->id])) {
-                    continue;
-                }
+            try {
+                $rows = $this->rows($client, $domain, $this->fields(), 8);
+            } catch (RuntimeException) {
+                $rows = $this->rows($client, $domain, ['name', 'default_code', 'list_price', 'categ_id'], 8);
+            }
 
-                $products[$product->id] = $product;
+            foreach ($rows as $row) {
+                $this->remember($products, $row);
 
-                if (count($products) >= 24) {
+                if (count($products) >= 40) {
                     return array_values($products);
                 }
             }
@@ -38,21 +88,50 @@ class DeneCatalogue
     }
 
     /**
+     * @param  array<int, string>  $terms
+     * @return array<int, string>
+     */
+    private function queries(array $terms): array
+    {
+        $queries = [];
+
+        foreach ($terms as $term) {
+            $term = trim($term);
+
+            if (mb_strlen($term) >= 3) {
+                $queries[strtolower($term)] = $term;
+            }
+
+            foreach (preg_split('/[^a-z0-9]+/i', strtolower($term)) ?: [] as $word) {
+                if (mb_strlen($word) >= 4 && ! in_array($word, ['with', 'from', 'that', 'this', 'nhs', 'care', 'product', 'products', 'service', 'services', 'medical', 'clinical'], true)) {
+                    $queries[$word] = $word;
+                }
+            }
+        }
+
+        return array_slice(array_values($queries), 0, 12);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function fields(): array
+    {
+        return ['name', 'default_code', 'list_price', 'categ_id', 'type'];
+    }
+
+    /**
+     * @param  array<int, mixed>  $domain
+     * @param  array<int, string>  $fields
      * @return array<int, array<string, mixed>>
      */
-    private function search(OdooClient $client, string $term): array
+    private function rows(OdooClient $client, array $domain, array $fields, int $limit): array
     {
         $foundModel = false;
 
         foreach (['product.template', 'product.product'] as $model) {
             try {
-                $rows = $client->searchRead($model, [
-                    '&',
-                    ['sale_ok', '=', true],
-                    '|',
-                    ['name', 'ilike', $term],
-                    ['default_code', 'ilike', $term],
-                ], ['name', 'default_code', 'list_price', 'categ_id'], 'id asc', 6, 0);
+                $rows = $client->searchRead($model, $domain, $fields, 'id asc', $limit, 0);
                 $foundModel = true;
             } catch (RuntimeException) {
                 continue;
@@ -71,9 +150,22 @@ class DeneCatalogue
     }
 
     /**
+     * @param  array<int, CatalogueProduct>  $products
      * @param  array<string, mixed>  $row
      */
-    private function product(array $row): ?CatalogueProduct
+    private function remember(array &$products, array $row, bool $service = false): void
+    {
+        $product = $this->product($row, $service);
+
+        if ($product !== null) {
+            $products[$product->id] = $product;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function product(array $row, bool $service = false): ?CatalogueProduct
     {
         $id = $row['id'] ?? null;
         $name = $this->text($row['name'] ?? null);
@@ -97,6 +189,7 @@ class DeneCatalogue
             available: null,
             description: '',
             pharmaceutical: false,
+            service: $service || ($row['type'] ?? null) === 'service',
         );
     }
 

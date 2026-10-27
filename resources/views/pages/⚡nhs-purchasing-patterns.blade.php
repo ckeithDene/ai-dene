@@ -255,8 +255,10 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         <div class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Recent directives') }}</flux:heading>
             @foreach ($this->directives as $directive)
-                <flux:card wire:key="nhs-directive-{{ $directive->id }}">
-                    <flux:heading>{{ $directive->title }}</flux:heading>
+                <flux:card wire:key="nhs-directive-{{ $directive->id }}" class="flex flex-col gap-2">
+                    <flux:heading>
+                        <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ $directive->title }}</flux:link>
+                    </flux:heading>
                     <flux:text>{{ collect([$directive->issuer, $directive->published_on, $directive->obligation->label()])->filter()->implode(' · ') }}</flux:text>
                     @if (filled($directive->summary))
                         <flux:text>{{ $directive->summary }}</flux:text>
@@ -269,6 +271,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                     @else
                         <flux:text>{{ __('Source link not found') }}</flux:text>
                     @endif
+                    <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ __('View purchasing impact') }}</flux:link>
                 </flux:card>
             @endforeach
         </div>

@@ -79,7 +79,9 @@ new #[Title('NHS purchasing pattern')] class extends Component {
             <flux:heading size="lg">{{ __('Directives') }}</flux:heading>
             @foreach ($opportunity->directives as $directive)
                 <flux:card wire:key="pattern-directive-{{ $directive->id }}" class="flex flex-col gap-2">
-                    <flux:heading>{{ $directive->title }}</flux:heading>
+                    <flux:heading>
+                        <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ $directive->title }}</flux:link>
+                    </flux:heading>
                     <flux:text>{{ $directive->obligation->label() }}{{ $directive->applies_to ? ' · '.$directive->applies_to : '' }}</flux:text>
                     @if (filled($directive->summary))
                         <flux:text>{{ $directive->summary }}</flux:text>
@@ -112,32 +114,67 @@ new #[Title('NHS purchasing pattern')] class extends Component {
         </div>
     @endif
 
-    @if ($gap)
-        <flux:card class="flex flex-col gap-4">
-            <div>
-                <flux:heading size="lg">{{ __('Dene Healthcare catalogue') }}</flux:heading>
-                <flux:text>{{ $gap->coverage->label() }} · {{ $gap->gap_type->label() }} · {{ $gap->sourcing_action->label() }}</flux:text>
-            </div>
-            @if ($gap->gap_score !== null)
-                <flux:text>{{ __('Catalogue gap score: :score/100. Margin, stock and supplier availability were not read, so they are not included.', ['score' => $gap->gap_score]) }}</flux:text>
-            @else
-                <flux:text>{{ __('Catalogue gap score unverified.') }}</flux:text>
-            @endif
-            @if (filled($gap->missing_items))
-                <flux:text>{{ $gap->missing_items }}</flux:text>
-            @endif
-            @if (filled($gap->recommendation))
-                <flux:text>{{ $gap->recommendation }}</flux:text>
-            @endif
-            @if ($gap->matched_products)
-                <div class="grid gap-2">
-                    @foreach ($gap->matched_products as $product)
-                        @if (is_array($product))
-                            <flux:text>{{ $product['name'] ?? '' }}{{ filled($product['sku'] ?? null) ? ' · '.$product['sku'] : '' }}{{ filled($product['list_price'] ?? null) ? ' · '.$product['list_price'] : '' }}</flux:text>
-                        @endif
+    <flux:card class="flex flex-col gap-3">
+        <flux:heading size="lg">{{ __('What to push') }}</flux:heading>
+        @if (filled($opportunity->pushText()))
+            <flux:text>{{ $opportunity->pushText() }}</flux:text>
+        @endif
+        @if ($gap && filled($gap->recommendation) && $gap->recommendation !== $opportunity->pushText())
+            <flux:text>{{ $gap->recommendation }}</flux:text>
+        @endif
+        @if (blank($opportunity->pushText()) && (! $gap || blank($gap->recommendation)))
+            <flux:text>{{ __('No sales push has been recorded for this pattern yet.') }}</flux:text>
+        @endif
+    </flux:card>
+
+    <flux:card class="flex flex-col gap-3">
+        <flux:heading size="lg">{{ __('Products that could benefit') }}</flux:heading>
+        @if ($gap && $gap->goods() !== [])
+            <flux:table>
+                <flux:table.columns>
+                    <flux:table.column>{{ __('Product') }}</flux:table.column>
+                    <flux:table.column>{{ __('SKU') }}</flux:table.column>
+                    <flux:table.column>{{ __('Price') }}</flux:table.column>
+                </flux:table.columns>
+                <flux:table.rows>
+                    @foreach ($gap->goods() as $product)
+                        <flux:table.row wire:key="pattern-product-{{ $product['id'] ?? $product['sku'] ?? $loop->index }}">
+                            <flux:table.cell variant="strong">{{ $product['name'] ?? '' }}</flux:table.cell>
+                            <flux:table.cell>{{ $product['sku'] ?? '' }}</flux:table.cell>
+                            <flux:table.cell>{{ $product['list_price'] ?? '' }}</flux:table.cell>
+                        </flux:table.row>
                     @endforeach
-                </div>
-            @endif
-        </flux:card>
-    @endif
+                </flux:table.rows>
+            </flux:table>
+        @else
+            <flux:text>{{ __('No Dene Healthcare product matched this pattern.') }}</flux:text>
+        @endif
+        @if ($gap && filled($gap->missing_items))
+            <flux:text>{{ $gap->missing_items }}</flux:text>
+        @endif
+    </flux:card>
+
+    <flux:card class="flex flex-col gap-3">
+        <flux:heading size="lg">{{ __('Services that could help') }}</flux:heading>
+        @if ($gap && $gap->services() !== [])
+            <flux:table>
+                <flux:table.columns>
+                    <flux:table.column>{{ __('Service') }}</flux:table.column>
+                    <flux:table.column>{{ __('SKU') }}</flux:table.column>
+                    <flux:table.column>{{ __('Price') }}</flux:table.column>
+                </flux:table.columns>
+                <flux:table.rows>
+                    @foreach ($gap->services() as $service)
+                        <flux:table.row wire:key="pattern-service-{{ $service['id'] ?? $service['sku'] ?? $loop->index }}">
+                            <flux:table.cell variant="strong">{{ $service['name'] ?? '' }}</flux:table.cell>
+                            <flux:table.cell>{{ $service['sku'] ?? '' }}</flux:table.cell>
+                            <flux:table.cell>{{ $service['list_price'] ?? '' }}</flux:table.cell>
+                        </flux:table.row>
+                    @endforeach
+                </flux:table.rows>
+            </flux:table>
+        @else
+            <flux:text>{{ __('No Dene Healthcare service matched this pattern.') }}</flux:text>
+        @endif
+    </flux:card>
 </div>
