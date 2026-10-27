@@ -92,7 +92,11 @@ new #[Title('First Order Diamonds')] class extends Component {
 
                         <div class="min-w-0 flex-1">
                             <div class="flex items-start justify-between gap-2">
-                                <flux:heading class="truncate">{{ $diamond->company_name }}</flux:heading>
+                                <flux:heading class="truncate">
+                                    <flux:link :href="route('companies.show', $diamond->odoo_partner_id)" wire:navigate>
+                                        {{ $diamond->company_name }}
+                                    </flux:link>
+                                </flux:heading>
 
                                 @if ($diamond->status === FirstOrderDiamondStatus::Failed)
                                     <flux:badge color="red">{{ __('Failed') }}</flux:badge>
@@ -155,8 +159,10 @@ new #[Title('First Order Diamonds')] class extends Component {
                         </dl>
                     @endif
 
-                    @if ($diamond->websiteUrl() || $diamond->odooOrderUrl())
-                        <div class="flex flex-wrap gap-4">
+                    <div class="flex flex-wrap gap-4">
+                            <flux:link :href="route('companies.show', $diamond->odoo_partner_id)" wire:navigate data-test="sales-strategy-link">
+                                {{ __('Sales strategy') }}
+                            </flux:link>
                             @if ($diamond->websiteLabel())
                                 <flux:link :href="$diamond->websiteUrl()" target="_blank" rel="noopener noreferrer">
                                     {{ $diamond->websiteLabel() }}
@@ -168,7 +174,6 @@ new #[Title('First Order Diamonds')] class extends Component {
                                 </flux:link>
                             @endif
                         </div>
-                    @endif
                 </flux:card>
             @endforeach
         </div>

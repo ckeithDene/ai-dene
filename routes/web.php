@@ -11,6 +11,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('first-order-diamonds', 'pages::first-order-diamonds')->name('first-order-diamonds');
     Route::get('first-order-diamonds/{diamond}/logo', FirstOrderDiamondLogoController::class)->name('first-order-diamonds.logo');
     Route::livewire('biggest-fish', 'pages::biggest-fish')->name('biggest-fish');
+    Route::livewire('companies/{partner}', 'pages::company')->whereNumber('partner')->name('companies.show');
     Route::get('biggest-fish/{fish}/logo', BiggestFishLogoController::class)->name('biggest-fish.logo');
 });
 

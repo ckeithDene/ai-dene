@@ -93,7 +93,11 @@ new #[Title('Biggest Fish')] class extends Component {
 
                         <div class="min-w-0 flex-1">
                             <div class="flex items-start justify-between gap-2">
-                                <flux:heading class="truncate">{{ $fish->company_name }}</flux:heading>
+                                <flux:heading class="truncate">
+                                    <flux:link :href="route('companies.show', $fish->odoo_partner_id)" wire:navigate>
+                                        {{ $fish->company_name }}
+                                    </flux:link>
+                                </flux:heading>
 
                                 @if ($fish->status === CustomerReviewStatus::Failed)
                                     <flux:badge color="red">{{ __('Failed') }}</flux:badge>
@@ -140,8 +144,10 @@ new #[Title('Biggest Fish')] class extends Component {
                         </dl>
                     @endif
 
-                    @if ($fish->websiteUrl() || $fish->odooPartnerUrl())
-                        <div class="flex flex-wrap gap-4">
+                    <div class="flex flex-wrap gap-4">
+                            <flux:link :href="route('companies.show', $fish->odoo_partner_id)" wire:navigate data-test="sales-strategy-link">
+                                {{ __('Sales strategy') }}
+                            </flux:link>
                             @if ($fish->websiteLabel())
                                 <flux:link :href="$fish->websiteUrl()" target="_blank" rel="noopener noreferrer">
                                     {{ $fish->websiteLabel() }}
@@ -153,7 +159,6 @@ new #[Title('Biggest Fish')] class extends Component {
                                 </flux:link>
                             @endif
                         </div>
-                    @endif
                 </flux:card>
             @endforeach
         </div>
