@@ -117,6 +117,10 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         </div>
     </div>
 
+    @if (filled($this->settings->last_summary))
+        <flux:callout :heading="__('Research summary')" :text="$this->settings->last_summary" />
+    @endif
+
     @if ($this->counts['opportunities'] === 0 && $this->directives->isEmpty())
         <flux:text>{{ __('No NHS purchasing patterns have been found yet.') }}</flux:text>
     @endif
@@ -194,6 +198,8 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                     <flux:text>{{ collect([$directive->issuer, $directive->published_on, $directive->obligation->label()])->filter()->implode(' · ') }}</flux:text>
                     @if ($directive->source_url)
                         <flux:link :href="$directive->source_url" target="_blank" rel="noopener noreferrer">{{ $directive->source_title ?: __('Source') }}</flux:link>
+                    @else
+                        <flux:text>{{ __('Source link not found') }}</flux:text>
                     @endif
                 </flux:card>
             @endforeach

@@ -66,6 +66,12 @@ class ResearchNhsPurchasing
         $settings->last_limitations = $summary['limitations'] !== '' ? $summary['limitations'] : null;
 
         if ($directives === []) {
+            $named = is_array($research['directives'] ?? null) ? count($research['directives']) : 0;
+
+            if ($named > 0) {
+                $settings->last_limitations = trim(($settings->last_limitations ?? '').' ChatGPT named directives, but none had a title and a summary or source link to save.');
+            }
+
             $settings->last_ran_at = now();
             $settings->save();
 
@@ -110,7 +116,7 @@ class ResearchNhsPurchasing
         $items = is_array($research['directives'] ?? null) ? $research['directives'] : [];
 
         foreach ($items as $item) {
-            if (! is_array($item) || count($saved) >= 15) {
+            if (! is_array($item) || count($saved) >= 20) {
                 continue;
             }
 
@@ -167,7 +173,7 @@ class ResearchNhsPurchasing
 
             $titles = $this->normalizer->directiveTitles($item);
             $linked = $directives->filter(fn (NhsDirective $directive): bool => collect($titles)->contains(
-                fn (string $title): bool => strcasecmp($title, $directive->title) === 0,
+                fn (string $title): bool => $this->titlesMatch($title, $directive->title),
             ));
 
             if ($linked->isEmpty()) {
@@ -311,6 +317,27 @@ class ResearchNhsPurchasing
         return in_array($exception->getMessage(), [
             'Could not reach ChatGPT.',
             'ChatGPT could not research NHS purchasing patterns.',
+            'ChatGPT did not return any NHS research.',
         ], true) ? $exception->getMessage() : __('ChatGPT could not research NHS purchasing patterns.');
+    }
+
+    private function titlesMatch(string $left, string $right): bool
+    {
+        $left = strtolower(trim($left));
+        $right = strtolower(trim($right));
+
+        if ($left === '' || $right === '') {
+            return false;
+        }
+
+        if ($left === $right) {
+            return true;
+        }
+
+        if (strlen($left) < 12 || strlen($right) < 12) {
+            return false;
+        }
+
+        return str_contains($left, $right) || str_contains($right, $left);
     }
 }

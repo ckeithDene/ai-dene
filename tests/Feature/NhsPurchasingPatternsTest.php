@@ -151,6 +151,14 @@ test('research keeps directives and matches them to the dene catalogue', functio
                         'source_url' => 'not-a-url',
                         'is_gp_relevant' => true,
                     ],
+                    [
+                        'title' => 'Design for Life roadmap',
+                        'issuer' => 'DHSC',
+                        'summary' => 'A policy direction toward reusable medical products by 2045.',
+                        'source_url' => null,
+                        'obligation_type' => 'strategic',
+                        'relevant' => true,
+                    ],
                 ],
             ]),
         ]);
@@ -165,6 +173,9 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->assertSee('Potential gap')
         ->assertSee('Carbon reporting was added.')
         ->assertSee('https://www.england.nhs.uk/carbon-reporting')
+        ->assertSee('Design for Life roadmap')
+        ->assertSee('Source link not found')
+        ->assertSee('One GP-relevant reporting change.')
         ->assertDontSee('Trust estates standard')
         ->assertDontSee('Hospital scanner')
         ->assertDontSee('FAKE-999')
@@ -173,7 +184,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->assertSee('Reduced-plastic couch roll')
         ->assertDontSee('Single-use plastic aprons');
 
-    expect(NhsDirective::query()->count())->toBe(1)
+    expect(NhsDirective::query()->count())->toBe(2)
         ->and(NhsProductOpportunity::query()->count())->toBe(2)
         ->and(NhsProductOpportunity::query()->where('name', 'Reduced-plastic couch roll')->first()->requirement_confirmed)->toBeFalse()
         ->and(NhsProductOpportunity::query()->where('name', 'Reduced-plastic couch roll')->first()->gap->coverage)->toBe(NhsCoverage::Partial)
@@ -233,6 +244,58 @@ test('catalogue matching waits until the dene connection exists', function () {
         ->assertSee('Catalogue matching required.');
 
     expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(2);
+});
+
+test('a written research answer is saved as directives', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    AiModel::factory()->create();
+
+    Http::fake(function (Request $request) {
+        $input = $request->data()['input'] ?? '';
+
+        if (str_contains($input, 'research_notes')) {
+            return Http::response([
+                'output_text' => json_encode([
+                    'summary' => 'Net zero supplier rules are the main change.',
+                    'directives' => [[
+                        'title' => 'Net Zero Supplier Roadmap',
+                        'issuer' => 'NHS England',
+                        'summary' => 'From April 2027 suppliers face tiered carbon reporting on new contracts.',
+                        'source_url' => 'https://www.england.nhs.uk/nhs-net-zero',
+                        'obligation_type' => 'procurement_policy',
+                        'relevant' => true,
+                    ]],
+                ]),
+            ]);
+        }
+
+        if (str_contains($input, 'directives_to_interpret')) {
+            return Http::response([
+                'output_text' => json_encode([
+                    'opportunities' => [[
+                        'directive_titles' => ['Net Zero Supplier Roadmap'],
+                        'name' => 'Lower-carbon examination gloves',
+                        'category' => 'Consumables',
+                        'demand_direction' => 'moderate_increase',
+                        'opportunity_score' => 70,
+                        'search_terms' => ['examination gloves'],
+                    ]],
+                ]),
+            ]);
+        }
+
+        return Http::response([
+            'output_text' => 'NHS England published the Net Zero Supplier Roadmap. From 1 April 2027 carbon reporting applies to new contracts.',
+        ]);
+    });
+
+    Livewire::test('pages::nhs-purchasing-patterns')
+        ->call('run')
+        ->assertSee('Net Zero Supplier Roadmap')
+        ->assertSee('Lower-carbon examination gloves')
+        ->assertSee('Net zero supplier rules are the main change.');
+
+    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(3);
 });
 
 test('the purchasing page escapes pattern names', function () {

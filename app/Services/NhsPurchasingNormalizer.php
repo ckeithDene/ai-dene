@@ -33,11 +33,12 @@ class NhsPurchasingNormalizer
      */
     public function directive(array $raw): ?array
     {
-        if ($this->bool($raw['is_gp_relevant'] ?? null) === false) {
+        if ($this->bool($raw['relevant'] ?? null) === false || $this->bool($raw['is_gp_relevant'] ?? null) === false) {
             return null;
         }
 
         $title = $this->text($raw['title'] ?? null, 255);
+        $summary = $this->text($raw['summary'] ?? null, 2000);
 
         if ($title === '') {
             return null;
@@ -46,7 +47,11 @@ class NhsPurchasingNormalizer
         $url = FirstOrderDiamond::httpUrl($raw['source_url'] ?? null);
         $host = parse_url((string) $url, PHP_URL_HOST);
 
-        if ($url === null || ! is_string($host) || ! str_contains($host, '.')) {
+        if (! is_string($host) || ! str_contains($host, '.')) {
+            $url = null;
+        }
+
+        if ($url === null && $summary === '') {
             return null;
         }
 
@@ -64,9 +69,9 @@ class NhsPurchasingNormalizer
             'applies_to' => $this->text($raw['applies_to'] ?? null, 255) ?: null,
             'source_title' => $this->text($raw['source_title'] ?? null, 255) ?: null,
             'source_url' => $url,
-            'summary' => $this->text($raw['summary'] ?? null, 2000) ?: null,
+            'summary' => $summary !== '' ? $summary : null,
             'commercial_implications' => $this->text($raw['commercial_implications'] ?? null, 2000) ?: null,
-            'confidence' => $this->confidence($raw['confidence'] ?? null),
+            'confidence' => $url === null ? 'Low' : $this->confidence($raw['confidence'] ?? null),
             'requirement_confirmed' => $confirmed,
         ];
     }
