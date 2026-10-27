@@ -375,7 +375,7 @@ test('the sidebar separates midmeds and dene healthcare', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('dashboard'))
         ->assertOk()
-        ->assertSeeInOrder(['MidMeds', 'First Order Diamonds', 'Biggest Fish', 'Dene Healthcare', 'Primary Care Spaces']);
+        ->assertSeeInOrder(['MidMeds', 'First Order Diamonds', 'Biggest Fish', 'Dene Healthcare', 'Primary Care Spaces', 'NHS Purchasing Patterns']);
 });
 
 test('dene healthcare can be saved beside the midmeds connection', function () {

@@ -242,7 +242,7 @@ new #[Title('Odoo connections')] class extends Component {
 
     <flux:heading level="2" class="sr-only">{{ __('Odoo connections') }}</flux:heading>
 
-    <x-pages::admin.layout :heading="__('Odoo connections')" :subheading="__('MidMeds is used by First Order Diamonds and Biggest Fish. Dene Healthcare is saved for the Dene section.')">
+    <x-pages::admin.layout :heading="__('Odoo connections')" :subheading="__('MidMeds is used by First Order Diamonds and Biggest Fish. Dene Healthcare is used by NHS Purchasing Patterns.')">
         <form wire:submit="save" class="my-6 w-full space-y-6" autocomplete="off">
             <flux:heading>{{ __('MidMeds') }}</flux:heading>
 

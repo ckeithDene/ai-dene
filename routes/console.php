@@ -24,3 +24,8 @@ Schedule::command('primary-care-spaces:check')
     ->daily()
     ->withoutOverlapping(180)
     ->runInBackground();
+
+Schedule::command('nhs-purchasing-patterns:check')
+    ->weekly()
+    ->withoutOverlapping(180)
+    ->runInBackground();

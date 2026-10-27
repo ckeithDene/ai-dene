@@ -14,6 +14,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('companies/{partner}', 'pages::company')->whereNumber('partner')->name('companies.show');
     Route::livewire('primary-care-spaces', 'pages::primary-care-spaces')->name('primary-care-spaces');
     Route::livewire('primary-care-spaces/{lead}', 'pages::gp-premises-project')->whereNumber('lead')->name('primary-care-spaces.show');
+    Route::livewire('nhs-purchasing-patterns', 'pages::nhs-purchasing-patterns')->name('nhs-purchasing-patterns');
+    Route::livewire('nhs-purchasing-patterns/{opportunity}', 'pages::nhs-purchasing-pattern')->whereNumber('opportunity')->name('nhs-purchasing-patterns.show');
     Route::get('biggest-fish/{fish}/logo', BiggestFishLogoController::class)->name('biggest-fish.logo');
 });
 
