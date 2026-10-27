@@ -1,6 +1,9 @@
 <?php
 
+use App\Actions\FindDeneProducts;
 use App\Models\NhsProductOpportunity;
+use Flux\Flux;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
@@ -13,6 +16,19 @@ new #[Title('NHS purchasing pattern')] class extends Component {
     public function mount(NhsProductOpportunity $opportunity): void
     {
         $this->opportunityId = $opportunity->id;
+    }
+
+    /**
+     * Search the Dene Healthcare Odoo catalogue for products and services to push.
+     */
+    public function findProducts(FindDeneProducts $finder): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $result = $finder->forOpportunity($this->opportunity);
+        unset($this->opportunity);
+
+        Flux::toast(variant: $result->found ? 'success' : 'danger', text: $result->message);
     }
 
     #[Computed]
@@ -128,7 +144,16 @@ new #[Title('NHS purchasing pattern')] class extends Component {
     </flux:card>
 
     <flux:card class="flex flex-col gap-3">
-        <flux:heading size="lg">{{ __('Products that could benefit') }}</flux:heading>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <flux:heading size="lg">{{ __('Products that could benefit') }}</flux:heading>
+            @if (auth()->user()->isAdmin())
+                <flux:button wire:click="findProducts" icon="magnifying-glass" data-test="find-dene-products">{{ __('Find Dene products') }}</flux:button>
+            @endif
+        </div>
+        <flux:text wire:loading wire:target="findProducts">{{ __('Searching the Dene Healthcare catalogue.') }}</flux:text>
+        @if ($gap && filled($gap->catalogue_status))
+            <flux:text>{{ $gap->catalogue_status }}</flux:text>
+        @endif
         @if ($gap && $gap->goods() !== [])
             <flux:table>
                 <flux:table.columns>
@@ -151,6 +176,12 @@ new #[Title('NHS purchasing pattern')] class extends Component {
         @endif
         @if ($gap && filled($gap->missing_items))
             <flux:text>{{ $gap->missing_items }}</flux:text>
+        @endif
+        @if ($gap && $gap->matched_categories)
+            <div>
+                <flux:heading>{{ __('Product categories') }}</flux:heading>
+                <flux:text class="mt-1">{{ implode(', ', $gap->matched_categories) }}</flux:text>
+            </div>
         @endif
     </flux:card>
 

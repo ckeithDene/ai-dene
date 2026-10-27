@@ -51,12 +51,87 @@ class DeneCatalogue
     }
 
     /**
+     * Read product categories whose names match the supplied phrases.
+     *
+     * @param  array<int, string>  $terms
+     * @return array<int, string>
+     */
+    public function categories(OdooClient $client, array $terms): array
+    {
+        return $this->categoryNames($client, function (string $term): array {
+            return [['name', 'ilike', $term]];
+        }, $terms);
+    }
+
+    /**
+     * Read the first catalogue categories, used to confirm the connection.
+     *
+     * @return array<int, string>
+     */
+    public function categorySample(OdooClient $client): array
+    {
+        try {
+            $rows = $client->searchRead('product.category', [], ['name', 'complete_name'], 'name asc', 15, 0);
+        } catch (RuntimeException) {
+            $rows = $client->searchRead('product.category', [], ['name'], 'name asc', 15, 0);
+        }
+
+        $names = [];
+
+        foreach ($rows as $row) {
+            $name = $this->text($row['complete_name'] ?? null);
+
+            if ($name === '') {
+                $name = $this->text($row['name'] ?? null);
+            }
+
+            if ($name !== '') {
+                $names[$name] = $name;
+            }
+        }
+
+        return array_values($names);
+    }
+
+    /**
+     * @param  callable(string): array<int, mixed>  $domain
+     * @param  array<int, string>  $terms
+     * @return array<int, string>
+     */
+    private function categoryNames(OdooClient $client, callable $domain, array $terms): array
+    {
+        $names = [];
+
+        foreach ($this->queries($terms) as $term) {
+            try {
+                $rows = $client->searchRead('product.category', $domain($term), ['name', 'complete_name'], 'name asc', 8, 0);
+            } catch (RuntimeException) {
+                $rows = $client->searchRead('product.category', $domain($term), ['name'], 'name asc', 8, 0);
+            }
+
+            foreach ($rows as $row) {
+                $name = $this->text($row['complete_name'] ?? null);
+
+                if ($name === '') {
+                    $name = $this->text($row['name'] ?? null);
+                }
+
+                if ($name !== '') {
+                    $names[$name] = $name;
+                }
+            }
+        }
+
+        return array_values($names);
+    }
+
+    /**
      * Search the Dene Healthcare catalogue for the supplied phrases.
      *
      * @param  array<int, string>  $terms
      * @return array<int, CatalogueProduct>
      */
-    public function products(OdooClient $client, array $terms): array
+    public function products(OdooClient $client, array $terms, bool $servicesOnly = false): array
     {
         $products = [];
 
@@ -68,6 +143,10 @@ class DeneCatalogue
                 ['name', 'ilike', $term],
                 ['default_code', 'ilike', $term],
             ];
+
+            if ($servicesOnly) {
+                $domain = ['&', ['type', '=', 'service'], ...$domain];
+            }
 
             try {
                 $rows = $this->rows($client, $domain, $this->fields(), 8);
@@ -170,9 +249,11 @@ class DeneCatalogue
         $id = $row['id'] ?? null;
         $name = $this->text($row['name'] ?? null);
 
-        if (! is_int($id) || $name === '') {
+        if (! is_numeric($id) || $name === '') {
             return null;
         }
+
+        $id = (int) $id;
 
         $category = is_array($row['categ_id'] ?? null) && is_string($row['categ_id'][1] ?? null)
             ? trim($row['categ_id'][1])

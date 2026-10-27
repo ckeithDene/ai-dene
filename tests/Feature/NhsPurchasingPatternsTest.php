@@ -1,6 +1,8 @@
 <?php
 
 use App\Enums\NhsCoverage;
+use App\Enums\NhsDemandDirection;
+use App\Enums\NhsObligation;
 use App\Models\AiModel;
 use App\Models\NhsDirective;
 use App\Models\NhsProductOpportunity;
@@ -365,6 +367,132 @@ test('nhs purchasing research runs once a week', function () {
         ->and($event->expression)->toBe('0 0 * * 0')
         ->and($event->withoutOverlapping)->toBeTrue();
 });
+
+test('finding dene products uses the dene connection and ignores midmeds', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    [$directive, $opportunity] = deneCataloguePattern();
+
+    Http::fake(function (Request $request) {
+        if (str_contains($request->url(), 'midmeds.odoo.com')) {
+            return Http::response(['error' => 'wrong company'], 500);
+        }
+
+        $params = $request->data()['params'] ?? [];
+
+        if (($params['method'] ?? null) === 'authenticate') {
+            return Http::response(['result' => 7]);
+        }
+
+        if (($params['args'][3] ?? null) === 'product.category') {
+            return Http::response([
+                'result' => [[
+                    'id' => 3,
+                    'name' => 'Furniture',
+                ]],
+            ]);
+        }
+
+        $domain = $params['args'][5][0] ?? [];
+        $serviceOnly = false;
+
+        if (is_array($domain)) {
+            foreach ($domain as $clause) {
+                if (is_array($clause) && ($clause[0] ?? null) === 'type' && ($clause[1] ?? null) === '=' && ($clause[2] ?? null) === 'service') {
+                    $serviceOnly = true;
+                }
+            }
+        }
+
+        if ($serviceOnly) {
+            return Http::response([
+                'result' => [[
+                    'id' => 91,
+                    'name' => 'Consultation room fit-out',
+                    'default_code' => 'FIT-1',
+                    'list_price' => 1200,
+                    'categ_id' => [4, 'Services'],
+                    'type' => 'service',
+                ]],
+            ]);
+        }
+
+        return Http::response([
+            'result' => [[
+                'id' => 88,
+                'name' => 'Couch roll',
+                'default_code' => 'COUCH-1',
+                'list_price' => 6,
+                'categ_id' => [3, 'Furniture'],
+                'type' => 'consu',
+            ]],
+        ]);
+    });
+
+    Livewire::test('pages::nhs-purchasing-pattern', ['opportunity' => $opportunity])
+        ->call('findProducts')
+        ->assertSee('Couch roll')
+        ->assertSee('COUCH-1')
+        ->assertSee('Consultation room fit-out')
+        ->assertSee('Furniture')
+        ->assertSee('dene.odoo.com');
+
+    Livewire::test('pages::nhs-purchasing-directive', ['directive' => $directive])
+        ->call('findProducts')
+        ->assertSee('Couch roll')
+        ->assertSee('Consultation room fit-out')
+        ->assertSee('Product categories');
+
+    expect(collect(Http::recorded())->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'midmeds.odoo.com')))->toBeFalse()
+        ->and(collect(Http::recorded())->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'dene.odoo.com')))->toBeTrue();
+});
+
+test('a catalogue search does not use the midmeds connection', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    [, $opportunity] = deneCataloguePattern();
+
+    Livewire::test('pages::nhs-purchasing-pattern', ['opportunity' => $opportunity])
+        ->call('findProducts')
+        ->assertSee('The saved MidMeds connection is not used here.');
+
+    Http::assertNothingSent();
+});
+
+test('non-admins cannot search the dene catalogue', function () {
+    $this->actingAs(User::factory()->create());
+    [, $opportunity] = deneCataloguePattern();
+
+    Livewire::test('pages::nhs-purchasing-pattern', ['opportunity' => $opportunity])
+        ->call('findProducts')
+        ->assertForbidden();
+
+    Http::assertNothingSent();
+});
+
+function deneCataloguePattern(): array
+{
+    $directive = NhsDirective::query()->create([
+        'fingerprint' => hash('sha256', 'dene-catalogue-directive'),
+        'title' => 'NHS carbon reporting',
+        'obligation' => NhsObligation::Strategic,
+        'commercial_implications' => 'Practices may ask about lower-plastic consumables.',
+        'confidence' => 'Medium',
+    ]);
+    $opportunity = NhsProductOpportunity::query()->create([
+        'fingerprint' => hash('sha256', 'dene-catalogue-couch'),
+        'name' => 'Reduced-plastic couch roll',
+        'category' => 'Consumables',
+        'demand_direction' => NhsDemandDirection::ModerateIncrease,
+        'search_terms' => ['couch roll'],
+        'opportunity_score' => 70,
+        'confidence' => 'Medium',
+    ]);
+    $directive->opportunities()->attach($opportunity);
+
+    return [$directive, $opportunity];
+}
 
 function nhsPurchasingOdoo(Request $request): PromiseInterface
 {

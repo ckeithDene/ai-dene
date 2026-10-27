@@ -1,6 +1,9 @@
 <?php
 
+use App\Actions\FindDeneProducts;
 use App\Models\NhsDirective;
+use Flux\Flux;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
@@ -13,6 +16,19 @@ new #[Title('NHS directive')] class extends Component {
     public function mount(NhsDirective $directive): void
     {
         $this->directiveId = $directive->id;
+    }
+
+    /**
+     * Search the Dene Healthcare Odoo catalogue for every pattern on this directive.
+     */
+    public function findProducts(FindDeneProducts $finder): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $result = $finder->forDirective($this->directive);
+        unset($this->directive);
+
+        Flux::toast(variant: $result->found ? 'success' : 'danger', text: $result->message);
     }
 
     #[Computed]
@@ -61,7 +77,13 @@ new #[Title('NHS directive')] class extends Component {
         <flux:text>{{ __('No purchasing patterns are linked to this directive yet.') }}</flux:text>
     @else
         <div class="flex flex-col gap-4">
-            <flux:heading size="lg">{{ __('What Dene Healthcare could offer') }}</flux:heading>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <flux:heading size="lg">{{ __('What Dene Healthcare could offer') }}</flux:heading>
+                @if (auth()->user()->isAdmin())
+                    <flux:button wire:click="findProducts" icon="magnifying-glass" data-test="find-dene-products">{{ __('Find Dene products') }}</flux:button>
+                @endif
+            </div>
+            <flux:text wire:loading wire:target="findProducts">{{ __('Searching the Dene Healthcare catalogue.') }}</flux:text>
             @foreach ($directive->opportunities as $opportunity)
                 <flux:card wire:key="directive-opportunity-{{ $opportunity->id }}" class="flex flex-col gap-4">
                     <div>
@@ -69,6 +91,9 @@ new #[Title('NHS directive')] class extends Component {
                             <flux:link :href="route('nhs-purchasing-patterns.show', $opportunity)" wire:navigate>{{ $opportunity->name }}</flux:link>
                         </flux:heading>
                         <flux:text>{{ $opportunity->demand_direction->outlookLabel() }}{{ filled($opportunity->rationale) ? ' · '.$opportunity->rationale : '' }}</flux:text>
+                        @if ($opportunity->gap && filled($opportunity->gap->catalogue_status))
+                            <flux:text>{{ $opportunity->gap->catalogue_status }}</flux:text>
+                        @endif
                     </div>
                     @if (filled($opportunity->pushText()))
                         <div>
@@ -86,6 +111,9 @@ new #[Title('NHS directive')] class extends Component {
                             </div>
                         @else
                             <flux:text class="mt-1">{{ __('No Dene Healthcare product matched this pattern.') }}</flux:text>
+                        @endif
+                        @if ($opportunity->gap && $opportunity->gap->matched_categories)
+                            <flux:text class="mt-1">{{ __('Product categories') }}: {{ implode(', ', $opportunity->gap->matched_categories) }}</flux:text>
                         @endif
                     </div>
                     <div>

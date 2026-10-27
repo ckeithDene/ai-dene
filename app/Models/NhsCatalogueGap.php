@@ -19,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $recommendation
  * @property string|null $missing_items
  * @property array<int, array<string, mixed>>|null $matched_products
+ * @property array<int, string>|null $matched_categories
+ * @property string|null $catalogue_status
  */
 #[Fillable([
     'nhs_product_opportunity_id',
@@ -29,6 +31,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'recommendation',
     'missing_items',
     'matched_products',
+    'matched_categories',
+    'catalogue_status',
 ])]
 class NhsCatalogueGap extends Model
 {
@@ -93,6 +97,7 @@ class NhsCatalogueGap extends Model
             'sourcing_action' => NhsSourcingAction::class,
             'gap_score' => 'integer',
             'matched_products' => 'array',
+            'matched_categories' => 'array',
         ];
     }
 }
