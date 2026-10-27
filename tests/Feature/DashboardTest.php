@@ -19,4 +19,5 @@ test('authenticated users can visit the dashboard', function () {
         ->get(route('dashboard'));
 
     $response->assertOk();
+    $response->assertSee('AI.DENE');
 });
