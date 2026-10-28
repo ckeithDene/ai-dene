@@ -28,12 +28,48 @@ class ResearchNhsPurchasing
     ) {}
 
     /**
-     * Check NHS directives, predict purchasing changes, and compare them with the Dene catalogue.
+     * Check NHS directives, news, blogs and Greener NHS, then compare them with the Dene catalogue.
      */
     public function handle(): NhsPurchasingResult
     {
         set_time_limit(0);
 
+        $failures = [];
+        $completed = 0;
+
+        foreach (['directives', 'directive-opportunities', 'news', 'greener', 'catalogue'] as $step) {
+            $result = $this->runStep($step);
+
+            if ($result->skippedReason === __('Connect ChatGPT before researching NHS purchasing patterns.')) {
+                return $result;
+            }
+
+            if ($result->skippedReason !== null) {
+                $failures[] = $result->skippedReason;
+            } else {
+                $completed++;
+            }
+        }
+
+        if ($failures !== []) {
+            $settings = NhsPurchasingSetting::current();
+            $settings->last_limitations = trim(($settings->last_limitations ?? '').' '.implode(' ', array_unique($failures)));
+            $settings->last_ran_at = now();
+            $settings->save();
+        }
+
+        return new NhsPurchasingResult(
+            NhsDirective::query()->count(),
+            NhsProductOpportunity::query()->count(),
+            $completed === 0 ? $failures[0] : null,
+        );
+    }
+
+    /**
+     * Run one part of the research so a single ChatGPT call can finish before the next starts.
+     */
+    public function runStep(string $step): NhsPurchasingResult
+    {
         $aiModel = AiModel::current();
 
         if ($aiModel === null || blank($aiModel->api_key)) {
@@ -41,71 +77,76 @@ class ResearchNhsPurchasing
         }
 
         try {
-            $existing = NhsDirective::query()
-                ->latest('id')
-                ->limit(15)
-                ->pluck('title')
-                ->all();
-            $research = $this->researcher->monitor($aiModel, $existing);
+            return match ($step) {
+                'directives' => $this->directivesStep($aiModel),
+                'directive-opportunities' => $this->directiveOpportunitiesStep($aiModel),
+                'news' => $this->sourcedOpportunitiesStep($aiModel, 'news'),
+                'greener' => $this->sourcedOpportunitiesStep($aiModel, 'greener'),
+                'catalogue' => $this->catalogueStep($aiModel),
+                default => new NhsPurchasingResult(0, 0),
+            };
         } catch (RuntimeException $exception) {
             return new NhsPurchasingResult(0, 0, $this->safeReason($exception));
         } catch (Throwable) {
             return new NhsPurchasingResult(0, 0, __('ChatGPT could not research NHS purchasing patterns.'));
         }
+    }
 
-        $directives = $this->storeDirectives($research);
+    private function directivesStep(AiModel $aiModel): NhsPurchasingResult
+    {
+        $existing = NhsDirective::query()
+            ->latest('id')
+            ->limit(8)
+            ->pluck('title')
+            ->map(fn (mixed $title): string => (string) $title)
+            ->all();
+        $research = $this->researcher->searchDirectives($aiModel, $existing);
+        $saved = $this->storeDirectives($research, 'directive');
+        $this->pruneDirectives($saved, 'directive');
+        NhsProductOpportunity::query()->whereDoesntHave('directives')->delete();
+        $this->rememberSummary($research);
 
-        if ($directives !== []) {
-            NhsDirective::query()->whereNotIn('id', collect($directives)->pluck('id'))->delete();
-        }
+        return new NhsPurchasingResult(count($saved), 0);
+    }
 
-        $summary = $this->normalizer->summary($research);
-        $settings = NhsPurchasingSetting::current();
-        $settings->last_summary = $summary['summary'] !== '' ? $summary['summary'] : null;
-        $settings->last_changes = $summary['changes'] !== '' ? $summary['changes'] : null;
-        $settings->last_limitations = $summary['limitations'] !== '' ? $summary['limitations'] : null;
+    private function directiveOpportunitiesStep(AiModel $aiModel): NhsPurchasingResult
+    {
+        $directives = NhsDirective::query()->get()
+            ->filter(fn (NhsDirective $directive): bool => $directive->researchGroup() === 'directive')
+            ->values()
+            ->all();
 
         if ($directives === []) {
-            $named = is_array($research['directives'] ?? null) ? count($research['directives']) : 0;
-
-            if ($named > 0) {
-                $settings->last_limitations = trim(($settings->last_limitations ?? '').' ChatGPT named directives, but none had a title and a summary or source link to save.');
-            }
-
-            $settings->last_ran_at = now();
-            $settings->save();
-
             return new NhsPurchasingResult(0, 0);
         }
 
-        $impact = is_array($research['opportunities'] ?? null) && $research['opportunities'] !== []
-            ? $research
-            : null;
+        $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), []);
+        $saved = $this->storeOpportunities($impact, 'directive');
+        $this->pruneOpportunities($saved, 'directive');
 
-        try {
-            if ($impact === null) {
-                $known = NhsProductOpportunity::query()->latest('id')->limit(30)->pluck('name')->all();
-                $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), $known);
-            }
-        } catch (RuntimeException $exception) {
-            $settings->last_ran_at = now();
-            $settings->save();
+        return new NhsPurchasingResult(count($directives), count($saved));
+    }
 
-            return new NhsPurchasingResult(count($directives), 0, $this->safeReason($exception));
-        } catch (Throwable) {
-            $settings->last_ran_at = now();
-            $settings->save();
+    private function sourcedOpportunitiesStep(AiModel $aiModel, string $group): NhsPurchasingResult
+    {
+        $research = $group === 'news'
+            ? $this->researcher->searchNews($aiModel)
+            : $this->researcher->searchGreener($aiModel);
+        $directives = $this->storeDirectives($research, $group);
+        $this->pruneDirectives($directives, $group);
+        NhsProductOpportunity::query()->whereDoesntHave('directives')->delete();
+        $opportunities = $this->storeOpportunities($research, $group);
+        $this->pruneOpportunities($opportunities, $group);
+        $this->rememberSummary($research);
 
-            return new NhsPurchasingResult(count($directives), 0, __('ChatGPT could not research NHS purchasing patterns.'));
-        }
+        return new NhsPurchasingResult(count($directives), count($opportunities));
+    }
 
-        $opportunities = $this->storeOpportunities($impact);
-
-        if ($opportunities !== []) {
-            NhsProductOpportunity::query()->whereNotIn('id', collect($opportunities)->pluck('id'))->delete();
-        }
-
+    private function catalogueStep(AiModel $aiModel): NhsPurchasingResult
+    {
+        $opportunities = NhsProductOpportunity::query()->get()->all();
         $limitation = $this->matchCatalogue($aiModel, $opportunities);
+        $settings = NhsPurchasingSetting::current();
 
         if ($limitation !== null) {
             $settings->last_limitations = trim(($settings->last_limitations ?? '').' '.$limitation);
@@ -114,17 +155,40 @@ class ResearchNhsPurchasing
         $settings->last_ran_at = now();
         $settings->save();
 
-        return new NhsPurchasingResult(count($directives), count($opportunities));
+        return new NhsPurchasingResult(NhsDirective::query()->count(), count($opportunities));
+    }
+
+    /**
+     * @param  array<string, mixed>  $research
+     */
+    private function rememberSummary(array $research): void
+    {
+        $summary = $this->normalizer->summary($research);
+        $settings = NhsPurchasingSetting::current();
+
+        if ($summary['summary'] !== '' && blank($settings->last_summary)) {
+            $settings->last_summary = $summary['summary'];
+        }
+
+        if ($summary['changes'] !== '') {
+            $settings->last_changes = $summary['changes'];
+        }
+
+        if ($summary['limitations'] !== '') {
+            $settings->last_limitations = trim(($settings->last_limitations ?? '').' '.$summary['limitations']);
+        }
+
+        $settings->save();
     }
 
     /**
      * @param  array<string, mixed>  $research
      * @return array<int, NhsDirective>
      */
-    private function storeDirectives(array $research): array
+    private function storeDirectives(array $research, string $group): array
     {
         $saved = [];
-        $items = $this->selectDirectives(is_array($research['directives'] ?? null) ? $research['directives'] : []);
+        $items = $this->selectDirectives(is_array($research['directives'] ?? null) ? $research['directives'] : [], $group);
 
         foreach ($items as $item) {
             $normalized = $this->normalizer->directive($item);
@@ -167,20 +231,17 @@ class ResearchNhsPurchasing
      * @param  array<string, mixed>  $impact
      * @return array<int, NhsProductOpportunity>
      */
-    private function storeOpportunities(array $impact): array
+    private function storeOpportunities(array $impact, string $group): array
     {
         $saved = [];
         $directives = NhsDirective::query()->get();
         $items = $this->selectOpportunities(
             is_array($impact['opportunities'] ?? null) ? $impact['opportunities'] : [],
             $directives,
+            $group,
         );
 
         foreach ($items as $item) {
-            if (count($saved) >= 15) {
-                break;
-            }
-
             $titles = $this->normalizer->directiveTitles($item);
             $linked = $directives->filter(fn (NhsDirective $directive): bool => collect($titles)->contains(
                 fn (string $title): bool => $this->titlesMatch($title, $directive->title),
@@ -327,42 +388,84 @@ class ResearchNhsPurchasing
     }
 
     /**
-     * Keep official directives first, then 8 news and blog items, then 7 Greener NHS items.
+     * Keep the requested source group up to its limit.
      *
      * @param  array<int, mixed>  $items
      * @return array<int, array<string, mixed>>
      */
-    private function selectDirectives(array $items): array
+    private function selectDirectives(array $items, string $group): array
     {
-        $groups = [
-            'directive' => [],
-            'news' => [],
-            'greener' => [],
-        ];
+        $selected = [];
         $limits = [
-            'directive' => 20,
+            'directive' => 8,
             'news' => 8,
-            'greener' => 7,
+            'greener' => 5,
         ];
 
         foreach ($items as $item) {
-            if (! is_array($item) || $this->normalizer->directive($item) === null) {
+            if (! is_array($item) || $this->normalizer->directive($item) === null || count($selected) >= $limits[$group]) {
                 continue;
             }
 
             $title = is_string($item['title'] ?? null) ? $item['title'] : null;
             $url = is_string($item['source_url'] ?? null) ? $item['source_url'] : null;
             $sourceTitle = is_string($item['source_title'] ?? null) ? $item['source_title'] : null;
-            $group = NhsDirective::researchGroupFor($title, $url, $sourceTitle);
 
-            if (count($groups[$group]) >= $limits[$group]) {
+            if (NhsDirective::researchGroupFor($title, $url, $sourceTitle) !== $group) {
                 continue;
             }
 
-            $groups[$group][] = $item;
+            $selected[] = $item;
         }
 
-        return array_merge($groups['directive'], $groups['news'], $groups['greener']);
+        return $selected;
+    }
+
+    /**
+     * @param  array<int, NhsDirective>  $saved
+     */
+    private function pruneDirectives(array $saved, string $group): void
+    {
+        if ($saved === []) {
+            return;
+        }
+
+        $ids = collect($saved)->pluck('id');
+
+        NhsDirective::query()->get()
+            ->filter(fn (NhsDirective $directive): bool => $directive->researchGroup() === $group && ! $ids->contains($directive->id))
+            ->each->delete();
+    }
+
+    /**
+     * @param  array<int, NhsProductOpportunity>  $saved
+     */
+    private function pruneOpportunities(array $saved, string $group): void
+    {
+        if ($saved === []) {
+            return;
+        }
+
+        $ids = collect($saved)->pluck('id');
+
+        NhsProductOpportunity::query()->with('directives')->get()
+            ->filter(function (NhsProductOpportunity $opportunity) use ($group, $ids): bool {
+                if ($ids->contains($opportunity->id)) {
+                    return false;
+                }
+
+                $best = $opportunity->directives
+                    ->map(fn (NhsDirective $directive): string => $directive->researchGroup())
+                    ->sortBy(fn (string $item): int => match ($item) {
+                        'news' => 1,
+                        'greener' => 2,
+                        default => 0,
+                    })
+                    ->first();
+
+                return $best === $group;
+            })
+            ->each->delete();
     }
 
     /**
@@ -372,7 +475,7 @@ class ResearchNhsPurchasing
      * @param  Collection<int, NhsDirective>  $directives
      * @return array<int, array<string, mixed>>
      */
-    private function selectOpportunities(array $items, Collection $directives): array
+    private function selectOpportunities(array $items, Collection $directives, string $onlyGroup): array
     {
         $combined = [];
 
@@ -405,7 +508,29 @@ class ResearchNhsPurchasing
             return ((int) ($right['opportunity_score'] ?? 0)) <=> ((int) ($left['opportunity_score'] ?? 0));
         });
 
-        return $selected;
+        $limits = [
+            'directive' => 8,
+            'news' => 8,
+            'greener' => 5,
+        ];
+        $picked = [];
+
+        foreach ($selected as $item) {
+            $group = match ($this->opportunityRank($item, $directives)) {
+                0 => 'directive',
+                1 => 'news',
+                2 => 'greener',
+                default => null,
+            };
+
+            if ($group !== $onlyGroup || count($picked) >= $limits[$onlyGroup]) {
+                continue;
+            }
+
+            $picked[] = $item;
+        }
+
+        return $picked;
     }
 
     /**

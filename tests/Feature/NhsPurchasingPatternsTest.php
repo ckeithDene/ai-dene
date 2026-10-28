@@ -40,41 +40,40 @@ test('the page explains when no purchasing patterns have been found', function (
         ->assertDontSee('Run research');
 });
 
-test('nhs purchasing research prioritises directives over news and greener nhs', function () {
+test('nhs purchasing research asks for directives news and greener nhs separately', function () {
     $aiModel = AiModel::factory()->create();
 
     Http::fake([
         'https://api.openai.com/v1/responses' => Http::response([
             'output_text' => json_encode([
                 'summary' => 'Directives first.',
-                'directives' => [],
+                'directives' => [[
+                    'title' => 'Community diagnostic centres',
+                    'summary' => 'More tests are moving out of hospital.',
+                    'source_url' => 'https://www.england.nhs.uk/diagnostics',
+                    'obligation_type' => 'strategic',
+                ]],
                 'opportunities' => [],
             ]),
         ]),
     ]);
 
-    app(NhsPurchasingResearcher::class)->monitor($aiModel, []);
+    app(NhsPurchasingResearcher::class)->searchDirectives($aiModel, []);
 
     Http::assertSent(function (Request $request): bool {
         $instructions = $request->data()['instructions'] ?? '';
         $input = json_decode((string) ($request->data()['input'] ?? ''), true);
-        $task = is_array($input) ? (string) ($input['task'] ?? '') : '';
 
         return $request->url() === 'https://api.openai.com/v1/responses'
-            && str_contains($instructions, 'Use at most 4 web searches')
-            && str_contains($instructions, 'Prioritise official NHS directives')
-            && str_contains($instructions, 'Reply with JSON only')
-            && str_contains($instructions, 'at most 8')
-            && str_contains($instructions, 'at most 7')
-            && str_contains($instructions, 'at most 15')
+            && str_contains($instructions, 'Return 8 different directives')
+            && str_contains($instructions, 'Do not search news, blogs, or Greener NHS')
             && ($request->data()['tools'][0]['search_context_size'] ?? null) === 'low'
-            && str_contains($task, 'at most 4 web searches')
-            && str_contains($task, 'Prioritise official NHS directives')
-            && str_contains($task, 'at most 15');
+            && is_array($input)
+            && ($input['search_target'] ?? null) === 'directives';
     });
 });
 
-test('a complete nhs search result is saved from one chatgpt call', function () {
+test('nhs purchasing research uses a separate chatgpt call for each source', function () {
     AiModel::factory()->create();
 
     Http::fake([
@@ -100,9 +99,19 @@ test('a complete nhs search result is saved from one chatgpt call', function () 
 
     app(ResearchNhsPurchasing::class)->handle();
 
+    $targets = collect(Http::recorded())
+        ->map(function (array $pair): ?string {
+            $input = json_decode((string) ($pair[0]->data()['input'] ?? ''), true);
+
+            return is_array($input) ? ($input['search_target'] ?? null) : null;
+        })
+        ->filter()
+        ->values()
+        ->all();
+
     expect(NhsDirective::query()->where('title', 'Community diagnostic centres')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic couch')->exists())->toBeTrue()
-        ->and(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(1);
+        ->and($targets)->toBe(['directives', 'directive-opportunities', 'news', 'greener']);
 });
 
 test('nhs purchasing research keeps directives ahead of a limited news and greener set', function () {
@@ -153,6 +162,16 @@ test('nhs purchasing research keeps directives ahead of a limited news and green
         ];
     }
 
+    for ($number = 1; $number <= 9; $number++) {
+        $opportunities[] = [
+            'directive_titles' => ['Practice staffing news '.$number],
+            'name' => 'Staffing product '.str_pad((string) $number, 2, '0', STR_PAD_LEFT),
+            'demand_direction' => 'moderate_increase',
+            'opportunity_score' => 40,
+            'confidence' => 'Low',
+        ];
+    }
+
     foreach (['Couch roll', 'Reduced-plastic couch roll', 'Lower-carbon couch roll', 'Sustainable couch roll', 'Reusable couch roll'] as $name) {
         $opportunities[] = [
             'directive_titles' => ['Greener NHS couch roll'],
@@ -189,13 +208,15 @@ test('nhs purchasing research keeps directives ahead of a limited news and green
 
     expect($groups->get('directive'))->toBe(4)
         ->and($groups->get('news'))->toBe(8)
-        ->and($groups->get('greener'))->toBe(7)
-        ->and(NhsProductOpportunity::query()->count())->toBe(15)
+        ->and($groups->get('greener'))->toBe(5)
+        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Diagnostic product%')->count())->toBe(8)
         ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 01')->exists())->toBeTrue()
-        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 14')->exists())->toBeTrue()
+        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 09')->exists())->toBeFalse()
+        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Staffing product%')->count())->toBe(8)
+        ->and(NhsProductOpportunity::query()->where('name', 'Staffing product 09')->exists())->toBeFalse()
         ->and(NhsProductOpportunity::query()->where('name', 'Couch roll')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'like', '%couch%')->count())->toBe(1)
-        ->and(NhsProductOpportunity::query()->where('name', 'Green gadget 1')->exists())->toBeFalse();
+        ->and(NhsProductOpportunity::query()->where('name', 'Green gadget 1')->exists())->toBeTrue();
 
     $this->get(route('nhs-purchasing-patterns'))
         ->assertOk()
@@ -335,12 +356,37 @@ test('research keeps directives and matches them to the dene catalogue', functio
                         'relevant' => true,
                     ],
                 ],
+                'opportunities' => [
+                    [
+                        'directive_titles' => ['NHS carbon reporting'],
+                        'name' => 'Reduced-plastic couch roll',
+                        'category' => 'Consumables',
+                        'demand_direction' => 'moderate_increase',
+                        'explanation' => 'Practices may look for lower-plastic couch roll as reporting begins.',
+                        'rationale' => 'Net zero and product footprinting',
+                        'sales_proposition' => 'Show practices the couch roll already supplied and ask what they want to change.',
+                        'opportunity_score' => 78,
+                        'confidence' => 'Medium',
+                        'search_terms' => ['couch roll'],
+                    ],
+                    [
+                        'directive_titles' => ['NHS carbon reporting'],
+                        'name' => 'Single-use plastic aprons',
+                        'category' => 'Consumables',
+                        'demand_direction' => 'moderate_decrease',
+                        'explanation' => 'Some disposable aprons may be bought less often if reusable alternatives are adopted.',
+                        'rationale' => 'Potential replacement where clinically appropriate',
+                        'opportunity_score' => 40,
+                        'confidence' => 'Low',
+                        'search_terms' => ['plastic apron'],
+                    ],
+                ],
             ]),
         ]);
     });
 
-    Livewire::test('pages::nhs-purchasing-patterns')
-        ->call('run')
+    $component = finishNhsResearch(Livewire::test('pages::nhs-purchasing-patterns')->call('run'));
+    $component
         ->assertSeeInOrder(['Product category', 'Expected direction', 'Rationale', 'Reduced-plastic couch roll', 'Opportunity', 'Net zero and product footprinting', 'Single-use plastic aprons', 'Pressure', 'Potential replacement where clinically appropriate'])
         ->assertSee('78/100')
         ->assertSee('Predicted commercial opportunity. This is not confirmation that a GP practice must buy this product.')
@@ -356,8 +402,9 @@ test('research keeps directives and matches them to the dene catalogue', functio
         ->assertSee('One GP-relevant reporting change.')
         ->assertDontSee('Trust estates standard')
         ->assertDontSee('Hospital scanner')
-        ->assertDontSee('FAKE-999')
-        ->call('run')
+        ->assertDontSee('FAKE-999');
+
+    finishNhsResearch($component->call('run'))
         ->set('view', 'growth')
         ->assertSee('Reduced-plastic couch roll')
         ->assertDontSee('Single-use plastic aprons');
@@ -370,7 +417,7 @@ test('research keeps directives and matches them to the dene catalogue', functio
 
     $recorded = collect(Http::recorded());
 
-    expect($recorded->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(8)
+    expect($recorded->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(10)
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'midmeds.odoo.com')))->toBeFalse()
         ->and($recorded->contains(fn (array $pair): bool => str_contains($pair[0]->url(), 'dene.odoo.com')))->toBeTrue();
 
@@ -427,14 +474,21 @@ test('catalogue matching waits until the dene connection exists', function () {
                     'title' => 'NHS carbon reporting',
                     'obligation_type' => 'strategic',
                     'source_url' => 'https://www.england.nhs.uk/carbon-reporting',
+                    'summary' => 'Organisations will report carbon.',
                     'is_gp_relevant' => true,
+                ]],
+                'opportunities' => [[
+                    'directive_titles' => ['NHS carbon reporting'],
+                    'name' => 'Reduced-plastic couch roll',
+                    'demand_direction' => 'moderate_increase',
+                    'opportunity_score' => 50,
+                    'search_terms' => ['couch roll'],
                 ]],
             ]),
         ]);
     });
 
-    Livewire::test('pages::nhs-purchasing-patterns')
-        ->call('run')
+    finishNhsResearch(Livewire::test('pages::nhs-purchasing-patterns')->call('run'))
         ->assertSee('Catalogue matching required.');
 
     expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(3);
@@ -446,6 +500,30 @@ test('a written research answer is saved as directives', function () {
 
     Http::fake(function (Request $request) {
         $input = $request->data()['input'] ?? '';
+
+        if (str_contains($input, '"search_target":"greener"')) {
+            return Http::response([
+                'output_text' => json_encode([
+                    'summary' => 'Net zero supplier rules are the main change.',
+                    'directives' => [[
+                        'title' => 'Net Zero Supplier Roadmap',
+                        'issuer' => 'NHS England',
+                        'summary' => 'From April 2027 suppliers face tiered carbon reporting on new contracts.',
+                        'source_url' => 'https://www.england.nhs.uk/nhs-net-zero',
+                        'obligation_type' => 'procurement_policy',
+                        'relevant' => true,
+                    ]],
+                    'opportunities' => [[
+                        'directive_titles' => ['Net Zero Supplier Roadmap'],
+                        'name' => 'Lower-carbon examination gloves',
+                        'category' => 'Consumables',
+                        'demand_direction' => 'moderate_increase',
+                        'opportunity_score' => 70,
+                        'search_terms' => ['examination gloves'],
+                    ]],
+                ]),
+            ]);
+        }
 
         if (str_contains($input, 'research_notes')) {
             return Http::response([
@@ -483,13 +561,12 @@ test('a written research answer is saved as directives', function () {
         ]);
     });
 
-    Livewire::test('pages::nhs-purchasing-patterns')
-        ->call('run')
+    finishNhsResearch(Livewire::test('pages::nhs-purchasing-patterns')->call('run'))
         ->assertSee('Net Zero Supplier Roadmap')
         ->assertSee('Lower-carbon examination gloves')
         ->assertSee('Net zero supplier rules are the main change.');
 
-    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(3);
+    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(5);
 });
 
 test('the purchasing page escapes pattern names', function () {
@@ -761,6 +838,18 @@ function savedNhsResearch(): array
     $settings->save();
 
     return [$kept, $removed, $directive];
+}
+
+function finishNhsResearch(object $component): object
+{
+    $guard = 0;
+
+    while ($component->get('researchStep') !== '' && $guard < 8) {
+        $component->call('advance');
+        $guard++;
+    }
+
+    return $component;
 }
 
 function deneCataloguePattern(): array

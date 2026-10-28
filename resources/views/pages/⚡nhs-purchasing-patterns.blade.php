@@ -21,6 +21,10 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
 
     public string $view = 'all';
 
+    public string $researchStep = '';
+
+    public string $researchWarning = '';
+
     public function updatedView(string $value): void
     {
         if (! in_array($value, ['all', 'growth', 'decline'], true)) {
@@ -37,21 +41,75 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     {
         Gate::authorize('accessAdmin');
 
-        $result = $research->handle();
-        $this->resetPage();
-        unset($this->opportunities, $this->outlook, $this->directives, $this->counts, $this->settings);
+        if ($this->researchStep !== '') {
+            return;
+        }
 
-        if ($result->skippedReason !== null) {
+        $this->researchWarning = '';
+        $this->researchStep = 'directives';
+        $this->advance($research);
+    }
+
+    /**
+     * Run the next ChatGPT search on its own request.
+     */
+    public function advance(ResearchNhsPurchasing $research): void
+    {
+        Gate::authorize('accessAdmin');
+
+        if ($this->researchStep === '') {
+            return;
+        }
+
+        $result = $research->runStep($this->researchStep);
+        $this->forgetResearchView();
+
+        if ($result->skippedReason === __('Connect ChatGPT before researching NHS purchasing patterns.')) {
+            $this->researchStep = '';
             Flux::toast(variant: 'danger', text: $result->skippedReason);
 
             return;
         }
 
-        Flux::toast(variant: 'success', text: trans_choice(
-            'Updated :count purchasing pattern.|Updated :count purchasing patterns.',
-            $result->opportunities,
-            ['count' => $result->opportunities],
-        ));
+        if ($result->skippedReason !== null && $this->researchWarning === '') {
+            $this->researchWarning = $result->skippedReason;
+        }
+
+        $this->researchStep = match ($this->researchStep) {
+            'directives' => 'directive-opportunities',
+            'directive-opportunities' => 'news',
+            'news' => 'greener',
+            'greener' => 'catalogue',
+            default => '',
+        };
+
+        if ($this->researchStep === '') {
+            if ($this->researchWarning !== '') {
+                Flux::toast(variant: 'danger', text: $this->researchWarning);
+                $this->researchWarning = '';
+
+                return;
+            }
+
+            $count = NhsProductOpportunity::query()->count();
+            Flux::toast(variant: 'success', text: trans_choice(
+                'Updated :count purchasing pattern.|Updated :count purchasing patterns.',
+                $count,
+                ['count' => $count],
+            ));
+        }
+    }
+
+    public function researchStatus(): string
+    {
+        return match ($this->researchStep) {
+            'directives' => __('Searching for NHS directives…'),
+            'directive-opportunities' => __('Finding opportunities from those directives…'),
+            'news' => __('Searching NHS news and blogs…'),
+            'greener' => __('Searching Greener NHS…'),
+            'catalogue' => __('Comparing opportunities with the Dene Healthcare catalogue…'),
+            default => '',
+        };
     }
 
     /**
@@ -61,9 +119,15 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     {
         Gate::authorize('accessAdmin');
 
+        if ($this->researchStep !== '') {
+            return;
+        }
+
         $this->deleteResearch();
         $this->forgetResearchView();
-        $this->run($research);
+        $this->researchWarning = '';
+        $this->researchStep = 'directives';
+        $this->advance($research);
     }
 
     /**
@@ -242,7 +306,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <flux:heading size="xl">{{ __('NHS Purchasing Patterns') }}</flux:heading>
-            <flux:subheading>{{ __('NHS directives first, then news, blogs and a smaller set of Greener NHS research, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
+            <flux:subheading>{{ __('Eight NHS directives, eight opportunities from those directives, eight from NHS news and blogs, and five from Greener NHS.') }}</flux:subheading>
         </div>
     </div>
 
@@ -416,7 +480,12 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     @if (auth()->user()->isAdmin())
         <flux:card class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Check NHS sources') }}</flux:heading>
-            <flux:text>{{ __('A weekly check prioritises directives, then adds NHS news and blogs and a smaller set of Greener NHS research. It updates the purchasing forecast and compares it with the Dene Healthcare catalogue.') }}</flux:text>
+            <flux:text>{{ __('Each part runs as its own ChatGPT search: directives, opportunities from those directives, NHS news and blogs, then Greener NHS.') }}</flux:text>
+            @if ($this->researchStep !== '')
+                <div wire:poll.1s="advance">
+                    <flux:text>{{ $this->researchStatus() }}</flux:text>
+                </div>
+            @endif
             <div class="flex flex-wrap gap-3">
                 <flux:button wire:click="run" icon="arrow-path" variant="primary" data-test="run-nhs-research">
                     {{ __('Run research') }}

@@ -12,23 +12,77 @@ class NhsPurchasingResearcher
     public function __construct(private NhsPurchasingPrompt $prompt) {}
 
     /**
-     * Search NHS sources, including news and blogs, for GP purchasing changes.
+     * Search for official NHS directives only.
      *
      * @param  array<int, string>  $existing
      * @return array<string, mixed>
      */
-    public function monitor(AiModel $aiModel, array $existing): array
+    public function searchDirectives(AiModel $aiModel, array $existing): array
     {
-        $notes = $this->request($aiModel, $this->prompt->monitor(), [
+        return $this->search($aiModel, $this->prompt->directives(), [
             'search_date' => now()->format('d/m/Y'),
-            'task' => 'Use at most 4 web searches, then stop. Prioritise official NHS directives. Then add at most 8 NHS news and blog items, and at most 7 Greener NHS or sustainability items, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/. Reply with JSON containing at most 15 purchasing opportunities and combine opportunities about the same product or service.',
+            'search_target' => 'directives',
+            'task' => 'Find 8 different official NHS directives that could change GP purchasing. Do not search news, blogs, or Greener NHS.',
             'existing_directives' => $existing,
         ], true);
-        $decoded = $this->decode($notes);
-        $hasDirectives = is_array($decoded) && is_array($decoded['directives'] ?? null) && $decoded['directives'] !== [];
-        $hasOpportunities = is_array($decoded) && is_array($decoded['opportunities'] ?? null) && $decoded['opportunities'] !== [];
+    }
 
-        if (! $hasDirectives || ! $hasOpportunities) {
+    /**
+     * Search NHS news and blogs for purchasing opportunities.
+     *
+     * @return array<string, mixed>
+     */
+    public function searchNews(AiModel $aiModel): array
+    {
+        return $this->search($aiModel, $this->prompt->news(), [
+            'search_date' => now()->format('d/m/Y'),
+            'search_target' => 'news',
+            'task' => 'Find 8 different purchasing opportunities from NHS news and blog pages. Do not search Greener NHS.',
+        ], true);
+    }
+
+    /**
+     * Search Greener NHS for purchasing opportunities.
+     *
+     * @return array<string, mixed>
+     */
+    public function searchGreener(AiModel $aiModel): array
+    {
+        return $this->search($aiModel, $this->prompt->greener(), [
+            'search_date' => now()->format('d/m/Y'),
+            'search_target' => 'greener',
+            'task' => 'Find 5 different purchasing opportunities from Greener NHS, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/.',
+        ], true);
+    }
+
+    /**
+     * Translate directives into product demand.
+     *
+     * @param  array<int, array<string, mixed>>  $directives
+     * @param  array<int, string>  $existingOpportunities
+     * @return array<string, mixed>
+     */
+    public function interpret(AiModel $aiModel, array $directives, array $existingOpportunities): array
+    {
+        return $this->search($aiModel, $this->prompt->interpret(), [
+            'search_date' => now()->format('d/m/Y'),
+            'search_target' => 'directive-opportunities',
+            'task' => 'Return 8 different purchasing opportunities from the supplied directives.',
+            'directives_to_interpret' => $directives,
+            'existing_opportunities' => $existingOpportunities,
+        ], false);
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    private function search(AiModel $aiModel, string $instructions, array $input, bool $web): array
+    {
+        $notes = $this->request($aiModel, $instructions, $input, $web);
+        $decoded = $this->decode($notes);
+
+        if (! is_array($decoded)) {
             if (trim($notes) === '') {
                 throw new RuntimeException('ChatGPT did not return any NHS research.');
             }
@@ -41,29 +95,6 @@ class NhsPurchasingResearcher
                 $decoded = $structured;
             }
         }
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException('ChatGPT could not research NHS purchasing patterns.');
-        }
-
-        return $decoded;
-    }
-
-    /**
-     * Translate directives into product demand.
-     *
-     * @param  array<int, array<string, mixed>>  $directives
-     * @param  array<int, string>  $existingOpportunities
-     * @return array<string, mixed>
-     */
-    public function interpret(AiModel $aiModel, array $directives, array $existingOpportunities): array
-    {
-        $notes = $this->request($aiModel, $this->prompt->interpret(), [
-            'search_date' => now()->format('d/m/Y'),
-            'directives_to_interpret' => $directives,
-            'existing_opportunities' => $existingOpportunities,
-        ], false);
-        $decoded = $this->decode($notes);
 
         if (! is_array($decoded)) {
             throw new RuntimeException('ChatGPT could not research NHS purchasing patterns.');
