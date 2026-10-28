@@ -15,6 +15,7 @@ use App\Services\DeneCatalogue;
 use App\Services\NhsPurchasingNormalizer;
 use App\Services\NhsPurchasingResearcher;
 use App\Services\OdooClient;
+use Illuminate\Support\Collection;
 use RuntimeException;
 use Throwable;
 
@@ -59,6 +60,11 @@ class ResearchNhsPurchasing
         }
 
         $directives = $this->storeDirectives($research);
+
+        if ($directives !== []) {
+            NhsDirective::query()->whereNotIn('id', collect($directives)->pluck('id'))->delete();
+        }
+
         $summary = $this->normalizer->summary($research);
         $settings = NhsPurchasingSetting::current();
         $settings->last_summary = $summary['summary'] !== '' ? $summary['summary'] : null;
@@ -100,6 +106,11 @@ class ResearchNhsPurchasing
         }
 
         $opportunities = $this->storeOpportunities($impact);
+
+        if ($opportunities !== []) {
+            NhsProductOpportunity::query()->whereNotIn('id', collect($opportunities)->pluck('id'))->delete();
+        }
+
         $limitation = $this->matchCatalogue($aiModel, $opportunities);
 
         if ($limitation !== null) {
@@ -119,13 +130,9 @@ class ResearchNhsPurchasing
     private function storeDirectives(array $research): array
     {
         $saved = [];
-        $items = is_array($research['directives'] ?? null) ? $research['directives'] : [];
+        $items = $this->selectDirectives(is_array($research['directives'] ?? null) ? $research['directives'] : []);
 
         foreach ($items as $item) {
-            if (! is_array($item) || count($saved) >= 20) {
-                continue;
-            }
-
             $normalized = $this->normalizer->directive($item);
 
             if ($normalized === null) {
@@ -169,12 +176,15 @@ class ResearchNhsPurchasing
     private function storeOpportunities(array $impact): array
     {
         $saved = [];
-        $items = is_array($impact['opportunities'] ?? null) ? $impact['opportunities'] : [];
         $directives = NhsDirective::query()->get();
+        $items = $this->selectOpportunities(
+            is_array($impact['opportunities'] ?? null) ? $impact['opportunities'] : [],
+            $directives,
+        );
 
         foreach ($items as $item) {
-            if (! is_array($item) || count($saved) >= 30) {
-                continue;
+            if (count($saved) >= 15) {
+                break;
             }
 
             $titles = $this->normalizer->directiveTitles($item);
@@ -320,6 +330,130 @@ class ResearchNhsPurchasing
         }
 
         return $limitation;
+    }
+
+    /**
+     * Keep official directives first, then 8 news and blog items, then 7 Greener NHS items.
+     *
+     * @param  array<int, mixed>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function selectDirectives(array $items): array
+    {
+        $groups = [
+            'directive' => [],
+            'news' => [],
+            'greener' => [],
+        ];
+        $limits = [
+            'directive' => 20,
+            'news' => 8,
+            'greener' => 7,
+        ];
+
+        foreach ($items as $item) {
+            if (! is_array($item) || $this->normalizer->directive($item) === null) {
+                continue;
+            }
+
+            $title = is_string($item['title'] ?? null) ? $item['title'] : null;
+            $url = is_string($item['source_url'] ?? null) ? $item['source_url'] : null;
+            $sourceTitle = is_string($item['source_title'] ?? null) ? $item['source_title'] : null;
+            $group = NhsDirective::researchGroupFor($title, $url, $sourceTitle);
+
+            if (count($groups[$group]) >= $limits[$group]) {
+                continue;
+            }
+
+            $groups[$group][] = $item;
+        }
+
+        return array_merge($groups['directive'], $groups['news'], $groups['greener']);
+    }
+
+    /**
+     * Combine similar opportunities and keep directive-backed ones ahead of news and Greener NHS.
+     *
+     * @param  array<int, mixed>  $items
+     * @param  Collection<int, NhsDirective>  $directives
+     * @return array<int, array<string, mixed>>
+     */
+    private function selectOpportunities(array $items, Collection $directives): array
+    {
+        $combined = [];
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $name = is_string($item['name'] ?? null) ? $item['name'] : '';
+            $key = $this->normalizer->similarOpportunityKey($name);
+
+            if ($key === '' || ! isset($combined[$key])) {
+                $combined[$key === '' ? 'item-'.count($combined) : $key] = $item;
+
+                continue;
+            }
+
+            $combined[$key] = $this->preferOpportunity($combined[$key], $item);
+        }
+
+        $selected = array_values($combined);
+
+        usort($selected, function (array $left, array $right) use ($directives): int {
+            $rank = $this->opportunityRank($left, $directives) <=> $this->opportunityRank($right, $directives);
+
+            if ($rank !== 0) {
+                return $rank;
+            }
+
+            return ((int) ($right['opportunity_score'] ?? 0)) <=> ((int) ($left['opportunity_score'] ?? 0));
+        });
+
+        return $selected;
+    }
+
+    /**
+     * @param  array<string, mixed>  $current
+     * @param  array<string, mixed>  $candidate
+     * @return array<string, mixed>
+     */
+    private function preferOpportunity(array $current, array $candidate): array
+    {
+        $preferred = ((int) ($candidate['opportunity_score'] ?? 0)) > ((int) ($current['opportunity_score'] ?? 0))
+            ? $candidate
+            : $current;
+        $other = $preferred === $candidate ? $current : $candidate;
+        $titles = array_values(array_unique(array_merge(
+            $this->normalizer->directiveTitles($preferred),
+            $this->normalizer->directiveTitles($other),
+        )));
+
+        if ($titles !== []) {
+            $preferred['directive_titles'] = $titles;
+        }
+
+        return $preferred;
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     * @param  Collection<int, NhsDirective>  $directives
+     */
+    private function opportunityRank(array $item, Collection $directives): int
+    {
+        $rank = 3;
+
+        foreach ($this->normalizer->directiveTitles($item) as $title) {
+            foreach ($directives as $directive) {
+                if ($this->titlesMatch($title, $directive->title)) {
+                    $rank = min($rank, $directive->researchGroupRank());
+                }
+            }
+        }
+
+        return $rank;
     }
 
     /**

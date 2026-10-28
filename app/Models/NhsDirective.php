@@ -58,6 +58,42 @@ class NhsDirective extends Model
     }
 
     /**
+     * Whether this source is an official directive, a news or blog item, or Greener NHS research.
+     */
+    public function researchGroup(): string
+    {
+        return self::researchGroupFor($this->title, $this->source_url, $this->source_title);
+    }
+
+    /**
+     * Official directives sort first, then news and blogs, then Greener NHS.
+     */
+    public function researchGroupRank(): int
+    {
+        return match ($this->researchGroup()) {
+            'news' => 1,
+            'greener' => 2,
+            default => 0,
+        };
+    }
+
+    public static function researchGroupFor(?string $title, ?string $url, ?string $sourceTitle): string
+    {
+        $heading = strtolower(trim(implode(' ', array_filter([$title, $sourceTitle]))));
+        $address = strtolower((string) $url);
+
+        if (preg_match('/greener|net zero|net-zero|sustainab|decarbon|carbon neutral|\bcarbon\b|climate/', $heading.' '.$address) === 1) {
+            return 'greener';
+        }
+
+        if (preg_match('#/(blog|news)(/|$)#', $address) === 1 || preg_match('/\b(blog|news)\b/', $heading) === 1) {
+            return 'news';
+        }
+
+        return 'directive';
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>

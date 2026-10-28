@@ -205,7 +205,30 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     #[Computed]
     public function directives(): Collection
     {
-        return NhsDirective::query()->latest('last_verified_at')->limit(8)->get();
+        return NhsDirective::query()->orderBy('title')->get();
+    }
+
+    /**
+     * @return Collection<int, array{label: string, items: Collection<int, NhsDirective>}>
+     */
+    #[Computed]
+    public function groupedDirectives(): Collection
+    {
+        $labels = [
+            'directive' => __('Directives'),
+            'news' => __('News and blogs'),
+            'greener' => __('Greener NHS'),
+        ];
+
+        return collect($labels)
+            ->map(fn (string $label, string $group): array => [
+                'label' => $label,
+                'items' => $this->directives->filter(
+                    fn (NhsDirective $directive): bool => $directive->researchGroup() === $group,
+                )->values(),
+            ])
+            ->filter(fn (array $group): bool => $group['items']->isNotEmpty())
+            ->values();
     }
 
     #[Computed]
@@ -219,7 +242,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <flux:heading size="xl">{{ __('NHS Purchasing Patterns') }}</flux:heading>
-            <flux:subheading>{{ __('NHS directives, news and blogs, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
+            <flux:subheading>{{ __('NHS directives first, then news, blogs and a smaller set of Greener NHS research, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
         </div>
     </div>
 
@@ -337,10 +360,11 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         @endif
     @endif
 
-    @if ($this->directives->isNotEmpty())
-        <div class="flex flex-col gap-3">
-            <flux:heading size="lg">{{ __('Recent directives') }}</flux:heading>
-            @foreach ($this->directives as $directive)
+    @if ($this->groupedDirectives->isNotEmpty())
+        @foreach ($this->groupedDirectives as $group)
+            <div class="flex flex-col gap-3">
+                <flux:heading size="lg">{{ $group['label'] }}</flux:heading>
+                @foreach ($group['items'] as $directive)
                 <flux:card wire:key="nhs-directive-{{ $directive->id }}" class="flex flex-col gap-2">
                     <flux:heading>
                         <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ $directive->title }}</flux:link>
@@ -373,8 +397,9 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                         @endif
                     </div>
                 </flux:card>
-            @endforeach
-        </div>
+                @endforeach
+            </div>
+        @endforeach
     @endif
 
     @if (filled($this->settings->last_changes))
@@ -391,7 +416,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     @if (auth()->user()->isAdmin())
         <flux:card class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Check NHS sources') }}</flux:heading>
-            <flux:text>{{ __('A weekly check looks for new directives, NHS news and blogs, updates the purchasing forecast, and compares it with the Dene Healthcare catalogue.') }}</flux:text>
+            <flux:text>{{ __('A weekly check prioritises directives, then adds NHS news and blogs and a smaller set of Greener NHS research. It updates the purchasing forecast and compares it with the Dene Healthcare catalogue.') }}</flux:text>
             <div class="flex flex-wrap gap-3">
                 <flux:button wire:click="run" icon="arrow-path" variant="primary" data-test="run-nhs-research">
                     {{ __('Run research') }}

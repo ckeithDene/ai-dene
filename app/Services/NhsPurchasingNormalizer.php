@@ -227,6 +227,28 @@ class NhsPurchasingNormalizer
         ];
     }
 
+    /**
+     * Group product names that describe the same purchasing opportunity.
+     */
+    public function similarOpportunityKey(string $name): string
+    {
+        $normalized = strtolower($name);
+        $normalized = preg_replace('/[^a-z0-9]+/', ' ', $normalized) ?? $normalized;
+        $normalized = trim($normalized);
+
+        if ($normalized === '') {
+            return '';
+        }
+
+        $words = array_values(array_filter(
+            explode(' ', $normalized),
+            fn (string $word): bool => ! in_array($word, ['lower', 'reduced', 'reusable', 'sustainable', 'greener', 'carbon', 'plastic', 'single', 'use', 'nhs'], true),
+        ));
+        $key = trim(implode(' ', $words));
+
+        return $key !== '' ? $key : $normalized;
+    }
+
     public function fingerprint(string $value): string
     {
         $normalized = strtolower($value);
