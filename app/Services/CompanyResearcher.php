@@ -16,8 +16,10 @@ class CompanyResearcher
      */
     public function research(AiModel $aiModel, string $company, string $address): CompanyBrief
     {
+        set_time_limit(330);
+
         $request = Http::connectTimeout(5)
-            ->timeout(40)
+            ->timeout(300)
             ->withoutRedirecting()
             ->acceptJson()
             ->asJson()

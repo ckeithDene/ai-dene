@@ -56,8 +56,10 @@ class SalesStrategist
      */
     private function request(AiModel $aiModel, string $instructions, array $input, bool $search): array
     {
+        set_time_limit(330);
+
         $request = Http::connectTimeout(5)
-            ->timeout(90)
+            ->timeout(300)
             ->withoutRedirecting()
             ->acceptJson()
             ->asJson()
