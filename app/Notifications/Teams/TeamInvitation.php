@@ -44,10 +44,10 @@ class TeamInvitation extends Notification implements ShouldQueue
                 'inviterName' => $inviter->name,
                 'teamName' => $team->name,
             ]))
-            ->line(__('Log in and visit your dashboard to accept or decline this invitation.'))
+            ->line(__('Set a password to join the team. If you already have an account, log in with this email address.'))
             ->action(
-                __('Log in'),
-                route('login', ['invitation' => $this->invitation->code]),
+                __('Join team'),
+                route('invitations.accept', $this->invitation),
             );
     }
 

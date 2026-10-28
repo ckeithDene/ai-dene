@@ -7,6 +7,10 @@
 
         @if ($teamInvitation)
             <x-team-invitation-alert :invitation="$teamInvitation" :action="__('Log in')" />
+
+            <flux:link :href="route('invitations.accept', $teamInvitation['code'])" data-test="set-invitation-password">
+                {{ __('New here? Set a password') }}
+            </flux:link>
         @endif
 
 

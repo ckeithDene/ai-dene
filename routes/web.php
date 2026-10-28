@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
 
+Route::livewire('invitations/{invitation}', 'pages::auth.accept-invitation')->name('invitations.accept');
+
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('first-order-diamonds', 'pages::first-order-diamonds')->name('first-order-diamonds');
     Route::get('first-order-diamonds/{diamond}/logo', FirstOrderDiamondLogoController::class)->name('first-order-diamonds.logo');
