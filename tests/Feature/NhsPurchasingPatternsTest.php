@@ -40,7 +40,7 @@ test('the page explains when no purchasing patterns have been found', function (
         ->assertDontSee('Run research');
 });
 
-test('nhs purchasing research uses the original brief one stage at a time', function () {
+test('nhs purchasing research searches directives news and sustainability in separate stages', function () {
     $aiModel = AiModel::factory()->create();
 
     Http::fake([
@@ -58,20 +58,37 @@ test('nhs purchasing research uses the original brief one stage at a time', func
         ]),
     ]);
 
-    app(NhsPurchasingResearcher::class)->searchStage($aiModel, 'clinical', []);
+    $researcher = app(NhsPurchasingResearcher::class);
+    $researcher->searchStage($aiModel, 'directives', []);
+    $researcher->searchStage($aiModel, 'news', []);
+    $researcher->searchStage($aiModel, 'greener', []);
+
+    $tasks = collect(Http::recorded())
+        ->map(function (array $pair): string {
+            $input = json_decode((string) ($pair[0]->data()['input'] ?? ''), true);
+
+            return is_array($input) ? (string) ($input['task'] ?? '') : '';
+        })
+        ->implode("\n");
+
+    expect($tasks)->toContain('specific official NHS directives')
+        ->and($tasks)->toContain('NHS England news and blogs')
+        ->and($tasks)->toContain('https://www.england.nhs.uk/greenernhs/')
+        ->and($tasks)->toContain('green practice and sustainability');
 
     Http::assertSent(function (Request $request): bool {
         $instructions = $request->data()['instructions'] ?? '';
         $input = json_decode((string) ($request->data()['input'] ?? ''), true);
 
         return $request->url() === 'https://api.openai.com/v1/responses'
-            && str_contains($instructions, 'Sustainability is only one possible theme')
-            && str_contains($instructions, 'clinical, community, diagnostics, digital, workforce')
+            && str_contains($instructions, 'specific NHS directives, NHS England news and blogs, and Greener NHS sustainability')
+            && str_contains($instructions, 'Include green practices and sustainability')
             && str_contains($instructions, 'Use one web search for the stage named in the user message')
             && ($request->data()['tools'][0]['search_context_size'] ?? null) === 'low'
             && is_array($input)
-            && ($input['search_target'] ?? null) === 'clinical'
-            && str_contains((string) ($input['task'] ?? ''), 'clinical guidance, community care and diagnostics');
+            && ($input['search_target'] ?? null) === 'directives'
+            && str_contains((string) ($input['task'] ?? ''), 'specific official NHS directives')
+            && str_contains((string) ($input['task'] ?? ''), 'green practice or sustainability');
     });
 });
 
@@ -113,7 +130,7 @@ test('nhs purchasing research uses a separate chatgpt call for each source', fun
 
     expect(NhsDirective::query()->where('title', 'Community diagnostic centres')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic couch')->exists())->toBeTrue()
-        ->and($targets)->toBe(['clinical', 'procurement', 'operations', 'opportunities']);
+        ->and($targets)->toBe(['directives', 'news', 'greener', 'opportunities']);
 });
 
 test('nhs purchasing research keeps every initiative the staged search returns', function () {

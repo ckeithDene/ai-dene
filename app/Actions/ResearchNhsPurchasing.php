@@ -28,7 +28,7 @@ class ResearchNhsPurchasing
     ) {}
 
     /**
-     * Check official NHS sources in stages, then compare them with the Dene catalogue.
+     * Check NHS directives, NHS England news and blogs, and Greener NHS, then compare them with the Dene catalogue.
      */
     public function handle(): NhsPurchasingResult
     {
@@ -37,7 +37,7 @@ class ResearchNhsPurchasing
         $failures = [];
         $completed = 0;
 
-        foreach (['clinical', 'procurement', 'operations', 'opportunities', 'catalogue'] as $step) {
+        foreach (['directives', 'news', 'greener', 'opportunities', 'catalogue'] as $step) {
             $result = $this->runStep($step);
 
             if ($result->skippedReason === __('Connect ChatGPT before researching NHS purchasing patterns.')) {
@@ -78,7 +78,7 @@ class ResearchNhsPurchasing
 
         try {
             return match ($step) {
-                'clinical', 'procurement', 'operations' => $this->stageStep($aiModel, $step),
+                'directives', 'news', 'greener' => $this->stageStep($aiModel, $step),
                 'opportunities' => $this->opportunitiesStep($aiModel),
                 'catalogue' => $this->catalogueStep($aiModel),
                 default => new NhsPurchasingResult(0, 0),

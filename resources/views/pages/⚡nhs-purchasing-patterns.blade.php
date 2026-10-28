@@ -46,7 +46,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         }
 
         $this->researchWarning = '';
-        $this->researchStep = 'clinical';
+        $this->researchStep = 'directives';
         $this->advance($research);
     }
 
@@ -76,9 +76,9 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         }
 
         $this->researchStep = match ($this->researchStep) {
-            'clinical' => 'procurement',
-            'procurement' => 'operations',
-            'operations' => 'opportunities',
+            'directives' => 'news',
+            'news' => 'greener',
+            'greener' => 'opportunities',
             'opportunities' => 'catalogue',
             default => '',
         };
@@ -103,9 +103,9 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     public function researchStatus(): string
     {
         return match ($this->researchStep) {
-            'clinical' => __('Searching clinical guidance, community care and diagnostics…'),
-            'procurement' => __('Searching funding, procurement and supply chain…'),
-            'operations' => __('Searching digital, workforce and regulation…'),
+            'directives' => __('Searching for specific NHS directives…'),
+            'news' => __('Searching NHS England news and blogs…'),
+            'greener' => __('Searching Greener NHS and sustainability…'),
             'opportunities' => __('Finding purchasing opportunities from those directives…'),
             'catalogue' => __('Comparing opportunities with the Dene Healthcare catalogue…'),
             default => '',
@@ -126,7 +126,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         $this->deleteResearch();
         $this->forgetResearchView();
         $this->researchWarning = '';
-        $this->researchStep = 'clinical';
+        $this->researchStep = 'directives';
         $this->advance($research);
     }
 
@@ -306,7 +306,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <flux:heading size="xl">{{ __('NHS Purchasing Patterns') }}</flux:heading>
-            <flux:subheading>{{ __('Official NHS sources, checked in stages: clinical and diagnostics, funding and procurement, then digital, workforce and regulation. Sustainability is only one theme.') }}</flux:subheading>
+            <flux:subheading>{{ __('Specific NHS directives, NHS England news and blogs, then Greener NHS and sustainability.') }}</flux:subheading>
         </div>
     </div>
 
@@ -480,7 +480,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     @if (auth()->user()->isAdmin())
         <flux:card class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Check NHS sources') }}</flux:heading>
-            <flux:text>{{ __('Each stage is its own ChatGPT search: clinical and diagnostics, funding and procurement, digital and workforce, then the purchasing opportunities.') }}</flux:text>
+            <flux:text>{{ __('Each stage is its own ChatGPT search: NHS directives, NHS England news and blogs, Greener NHS and sustainability, then the purchasing opportunities.') }}</flux:text>
             @if ($this->researchStep !== '')
                 <div wire:poll.1s="advance">
                     <flux:text>{{ $this->researchStatus() }}</flux:text>

@@ -30,9 +30,9 @@ class NhsPurchasingResearcher
     private function stageTask(string $stage): string
     {
         return match ($stage) {
-            'procurement' => 'This stage is funding, procurement rules, supply-chain plans, standardisation and value-based buying. Use the Department of Health and Social Care, NHS Supply Chain, the NHS Business Services Authority and integrated care boards. Sustainability is only one possible theme, so do not make it the subject of this search.',
-            'operations' => 'This stage is digital, workforce, resilience and regulation. Sustainability is only one possible theme, so do not make it the subject of this search.',
-            default => 'This stage is clinical guidance, community care and diagnostics. Use NHS England and NICE. Sustainability is only one possible theme, so do not make it the subject of this search.',
+            'news' => 'This stage is NHS England news and blogs. Search NHS England news pages and blog pages, including stories about green practice and sustainability. Each finding must come from an NHS England news or blog page.',
+            'greener' => 'This stage is Greener NHS, green practice and sustainability. Search https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/ and the other Greener NHS pages those searches return.',
+            default => 'This stage is specific official NHS directives, strategies, funding, clinical guidance, procurement rules and supply-chain plans. Include a directive about green practice or sustainability when the search finds one.',
         };
     }
 
