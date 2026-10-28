@@ -2,6 +2,7 @@
 
 use App\Actions\ResearchNhsPurchasing;
 use App\Enums\NhsDemandDirection;
+use App\Models\NhsCatalogueGap;
 use App\Models\NhsDirective;
 use App\Models\NhsProductOpportunity;
 use App\Models\NhsPurchasingSetting;
@@ -51,6 +52,77 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
             $result->opportunities,
             ['count' => $result->opportunities],
         ));
+    }
+
+    /**
+     * Remove the saved NHS research and check the sources again.
+     */
+    public function refreshResearch(ResearchNhsPurchasing $research): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $this->deleteResearch();
+        $this->forgetResearchView();
+        $this->run($research);
+    }
+
+    /**
+     * Remove every saved directive, purchasing pattern, and research summary.
+     */
+    public function clearResearch(): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $this->deleteResearch();
+        $this->forgetResearchView();
+
+        Flux::toast(variant: 'success', text: __('NHS research removed.'));
+    }
+
+    /**
+     * Remove one purchasing pattern.
+     */
+    public function removeOpportunity(int $opportunityId): void
+    {
+        Gate::authorize('accessAdmin');
+
+        NhsProductOpportunity::query()->whereKey($opportunityId)->delete();
+        $this->forgetResearchView();
+
+        Flux::toast(variant: 'success', text: __('Purchasing pattern removed.'));
+    }
+
+    /**
+     * Remove one directive.
+     */
+    public function removeDirective(int $directiveId): void
+    {
+        Gate::authorize('accessAdmin');
+
+        NhsDirective::query()->whereKey($directiveId)->delete();
+        $this->forgetResearchView();
+
+        Flux::toast(variant: 'success', text: __('Directive removed.'));
+    }
+
+    private function deleteResearch(): void
+    {
+        NhsCatalogueGap::query()->delete();
+        NhsDirective::query()->delete();
+        NhsProductOpportunity::query()->delete();
+
+        $settings = NhsPurchasingSetting::current();
+        $settings->last_summary = null;
+        $settings->last_changes = null;
+        $settings->last_limitations = null;
+        $settings->last_ran_at = null;
+        $settings->save();
+    }
+
+    private function forgetResearchView(): void
+    {
+        $this->resetPage();
+        unset($this->opportunities, $this->outlook, $this->directives, $this->counts, $this->settings);
     }
 
     /**
@@ -230,9 +302,23 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                                 </div>
                                 <flux:text class="mt-1">{{ $opportunity->category ?: __('Uncategorised') }}</flux:text>
                             </div>
-                            <div class="text-right">
-                                <flux:text class="text-zinc-500">{{ $opportunity->priorityLabel() }}</flux:text>
-                                <flux:heading>{{ $opportunity->opportunity_score }}/100</flux:heading>
+                            <div class="flex flex-col items-end gap-2">
+                                <div class="text-right">
+                                    <flux:text class="text-zinc-500">{{ $opportunity->priorityLabel() }}</flux:text>
+                                    <flux:heading>{{ $opportunity->opportunity_score }}/100</flux:heading>
+                                </div>
+                                @if (auth()->user()->isAdmin())
+                                    <flux:button
+                                        type="button"
+                                        variant="ghost"
+                                        icon="x-circle"
+                                        wire:click="removeOpportunity({{ $opportunity->id }})"
+                                        wire:confirm="{{ __('Remove this purchasing pattern?') }}"
+                                        data-test="remove-nhs-opportunity-{{ $opportunity->id }}"
+                                    >
+                                        {{ __('Remove') }}
+                                    </flux:button>
+                                @endif
                             </div>
                         </div>
                         @if (filled($opportunity->explanation))
@@ -271,7 +357,21 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
                     @else
                         <flux:text>{{ __('Source link not found') }}</flux:text>
                     @endif
-                    <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ __('View purchasing impact') }}</flux:link>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <flux:link :href="route('nhs-purchasing-patterns.directives.show', $directive)" wire:navigate>{{ __('View purchasing impact') }}</flux:link>
+                        @if (auth()->user()->isAdmin())
+                            <flux:button
+                                type="button"
+                                variant="ghost"
+                                icon="x-circle"
+                                wire:click="removeDirective({{ $directive->id }})"
+                                wire:confirm="{{ __('Remove this directive?') }}"
+                                data-test="remove-nhs-directive-{{ $directive->id }}"
+                            >
+                                {{ __('Remove') }}
+                            </flux:button>
+                        @endif
+                    </div>
                 </flux:card>
             @endforeach
         </div>
@@ -292,9 +392,30 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
         <flux:card class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Check NHS sources') }}</flux:heading>
             <flux:text>{{ __('A weekly check looks for new directives, updates the purchasing forecast, and compares it with the Dene Healthcare catalogue.') }}</flux:text>
-            <flux:button wire:click="run" icon="arrow-path" variant="primary" data-test="run-nhs-research">
-                {{ __('Run research') }}
-            </flux:button>
+            <div class="flex flex-wrap gap-3">
+                <flux:button wire:click="run" icon="arrow-path" variant="primary" data-test="run-nhs-research">
+                    {{ __('Run research') }}
+                </flux:button>
+                <flux:button
+                    type="button"
+                    wire:click="refreshResearch"
+                    wire:confirm="{{ __('Remove the saved research and check NHS sources again?') }}"
+                    icon="arrow-path"
+                    data-test="refresh-nhs-research"
+                >
+                    {{ __('Refresh research') }}
+                </flux:button>
+                <flux:button
+                    type="button"
+                    variant="danger"
+                    wire:click="clearResearch"
+                    wire:confirm="{{ __('Remove all saved NHS research?') }}"
+                    icon="x-circle"
+                    data-test="clear-nhs-research"
+                >
+                    {{ __('Remove all research') }}
+                </flux:button>
+            </div>
             <flux:text wire:loading>{{ __('Checking NHS sources and the Dene Healthcare catalogue. This can take a few minutes.') }}</flux:text>
         </flux:card>
     @endif

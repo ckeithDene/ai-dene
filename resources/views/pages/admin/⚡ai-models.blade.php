@@ -149,6 +149,37 @@ new #[Title('AI Models')] class extends Component {
     }
 
     /**
+     * Fill the model box from the list.
+     */
+    public function selectModel(string $model): void
+    {
+        $this->authorizeAccess();
+
+        $allowed = array_column($this->modelChoices(), 'code');
+
+        if (! in_array($model, $allowed, true)) {
+            return;
+        }
+
+        $this->model = $model;
+    }
+
+    /**
+     * Current ChatGPT model codes and what each one is for.
+     *
+     * @return list<array{code: string, use: string}>
+     */
+    public function modelChoices(): array
+    {
+        return [
+            ['code' => 'gpt-6-astra', 'use' => __('Most capable. Slowest. Hard research.')],
+            ['code' => 'gpt-6.1-sol', 'use' => __('Balanced everyday work.')],
+            ['code' => 'gpt-6.1-terra', 'use' => __('Faster writing and visual tasks.')],
+            ['code' => 'gpt-6-luna', 'use' => __('Fastest. Use this when a job times out.')],
+        ];
+    }
+
+    /**
      * Limit this page to application admins.
      */
     protected function authorizeAccess(): void
@@ -162,18 +193,40 @@ new #[Title('AI Models')] class extends Component {
 
     <flux:heading level="2" class="sr-only">{{ __('AI Models') }}</flux:heading>
 
-    <x-pages::admin.layout :heading="__('AI Models')" :subheading="__('API connection details for ChatGPT')">
+    <x-pages::admin.layout wide :heading="__('AI Models')" :subheading="__('API connection details for ChatGPT')">
         <form wire:submit="save" class="my-6 w-full space-y-6" autocomplete="off">
-            <flux:input
-                wire:model="model"
-                :label="__('Model')"
-                type="text"
-                required
-                autofocus
-                autocomplete="off"
-                placeholder="gpt-4o"
-                :description="__('The ChatGPT model to use.')"
-            />
+            <div class="grid items-start gap-6 lg:grid-cols-2">
+                <flux:input
+                    wire:model="model"
+                    :label="__('Model')"
+                    type="text"
+                    required
+                    autofocus
+                    autocomplete="off"
+                    placeholder="gpt-6-luna"
+                    :description="__('The ChatGPT model to use. Click a code to fill this box.')"
+                />
+
+                <div class="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                    <flux:text class="font-medium">{{ __('Model codes') }}</flux:text>
+
+                    <ul class="flex flex-col gap-3">
+                        @foreach ($this->modelChoices() as $choice)
+                            <li class="flex flex-col gap-1" wire:key="model-{{ $choice['code'] }}">
+                                <button
+                                    type="button"
+                                    wire:click="selectModel('{{ $choice['code'] }}')"
+                                    class="w-fit font-mono text-sm text-zinc-900 underline decoration-zinc-400 underline-offset-4 dark:text-zinc-100"
+                                    data-test="model-choice-{{ $choice['code'] }}"
+                                >
+                                    {{ $choice['code'] }}
+                                </button>
+                                <flux:text>{{ $choice['use'] }}</flux:text>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+            </div>
 
             <flux:input
                 wire:model="organization"

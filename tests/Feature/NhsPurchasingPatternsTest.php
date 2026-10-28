@@ -2,10 +2,14 @@
 
 use App\Enums\NhsCoverage;
 use App\Enums\NhsDemandDirection;
+use App\Enums\NhsGapType;
 use App\Enums\NhsObligation;
+use App\Enums\NhsSourcingAction;
 use App\Models\AiModel;
+use App\Models\NhsCatalogueGap;
 use App\Models\NhsDirective;
 use App\Models\NhsProductOpportunity;
+use App\Models\NhsPurchasingSetting;
 use App\Models\OdooConnection;
 use App\Models\User;
 use GuzzleHttp\Promise\PromiseInterface;
@@ -460,6 +464,88 @@ test('a catalogue search does not use the midmeds connection', function () {
     Http::assertNothingSent();
 });
 
+test('an admin can remove all nhs research', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    [$kept] = savedNhsResearch();
+
+    $this->get(route('nhs-purchasing-patterns'))
+        ->assertOk()
+        ->assertSee('data-test="clear-nhs-research"', false)
+        ->assertSee('data-test="refresh-nhs-research"', false)
+        ->assertSee('data-test="remove-nhs-opportunity-'.$kept->id.'"', false);
+
+    Livewire::test('pages::nhs-purchasing-patterns')
+        ->call('clearResearch')
+        ->assertOk();
+
+    expect(NhsDirective::query()->count())->toBe(0)
+        ->and(NhsProductOpportunity::query()->count())->toBe(0)
+        ->and(NhsCatalogueGap::query()->count())->toBe(0)
+        ->and(NhsPurchasingSetting::current()->last_summary)->toBeNull()
+        ->and(NhsPurchasingSetting::current()->last_changes)->toBeNull()
+        ->and(NhsPurchasingSetting::current()->last_limitations)->toBeNull();
+
+    $this->get(route('nhs-purchasing-patterns'))
+        ->assertOk()
+        ->assertSee('No NHS purchasing patterns have been found yet.')
+        ->assertDontSee('Couch roll demand')
+        ->assertDontSee('Old NHS summary');
+});
+
+test('an admin can remove one purchasing pattern or directive', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    [$kept, $removed, $directive] = savedNhsResearch();
+
+    Livewire::test('pages::nhs-purchasing-patterns')
+        ->call('removeOpportunity', $removed->id)
+        ->assertOk();
+
+    expect(NhsProductOpportunity::query()->whereKey($kept->id)->exists())->toBeTrue()
+        ->and(NhsProductOpportunity::query()->whereKey($removed->id)->exists())->toBeFalse()
+        ->and(NhsCatalogueGap::query()->where('nhs_product_opportunity_id', $removed->id)->exists())->toBeFalse()
+        ->and(NhsDirective::query()->whereKey($directive->id)->exists())->toBeTrue();
+
+    Livewire::test('pages::nhs-purchasing-patterns')
+        ->call('removeDirective', $directive->id)
+        ->assertOk();
+
+    expect(NhsDirective::query()->count())->toBe(0)
+        ->and(NhsProductOpportunity::query()->whereKey($kept->id)->exists())->toBeTrue();
+});
+
+test('refreshing nhs research clears the saved record before checking again', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    savedNhsResearch();
+
+    Livewire::test('pages::nhs-purchasing-patterns')
+        ->call('refreshResearch')
+        ->assertOk();
+
+    expect(NhsDirective::query()->count())->toBe(0)
+        ->and(NhsProductOpportunity::query()->count())->toBe(0)
+        ->and(NhsCatalogueGap::query()->count())->toBe(0);
+
+    Http::assertNothingSent();
+});
+
+test('non-admins cannot remove nhs research', function () {
+    $this->actingAs(User::factory()->create());
+    [, $opportunity, $directive] = savedNhsResearch();
+
+    $this->get(route('nhs-purchasing-patterns'))
+        ->assertOk()
+        ->assertDontSee('data-test="clear-nhs-research"', false)
+        ->assertDontSee('data-test="remove-nhs-opportunity-'.$opportunity->id.'"', false);
+
+    Livewire::test('pages::nhs-purchasing-patterns')->call('clearResearch')->assertForbidden();
+    Livewire::test('pages::nhs-purchasing-patterns')->call('refreshResearch')->assertForbidden();
+    Livewire::test('pages::nhs-purchasing-patterns')->call('removeOpportunity', $opportunity->id)->assertForbidden();
+    Livewire::test('pages::nhs-purchasing-patterns')->call('removeDirective', $directive->id)->assertForbidden();
+
+    expect(NhsDirective::query()->count())->toBe(1)
+        ->and(NhsProductOpportunity::query()->count())->toBe(2);
+});
+
 test('non-admins cannot search the dene catalogue', function () {
     $this->actingAs(User::factory()->create());
     [, $opportunity] = deneCataloguePattern();
@@ -470,6 +556,48 @@ test('non-admins cannot search the dene catalogue', function () {
 
     Http::assertNothingSent();
 });
+
+/**
+ * @return array{0: NhsProductOpportunity, 1: NhsProductOpportunity, 2: NhsDirective}
+ */
+function savedNhsResearch(): array
+{
+    $directive = NhsDirective::query()->create([
+        'fingerprint' => hash('sha256', 'saved-directive'),
+        'title' => 'NHS carbon reporting',
+        'obligation' => NhsObligation::Strategic,
+        'confidence' => 'Medium',
+    ]);
+    $kept = NhsProductOpportunity::query()->create([
+        'fingerprint' => hash('sha256', 'kept-pattern'),
+        'name' => 'Examination gloves',
+        'demand_direction' => NhsDemandDirection::ModerateIncrease,
+        'opportunity_score' => 40,
+        'confidence' => 'Medium',
+    ]);
+    $removed = NhsProductOpportunity::query()->create([
+        'fingerprint' => hash('sha256', 'removed-pattern'),
+        'name' => 'Couch roll demand',
+        'demand_direction' => NhsDemandDirection::ModerateDecrease,
+        'opportunity_score' => 20,
+        'confidence' => 'Low',
+    ]);
+    $directive->opportunities()->attach([$kept->id, $removed->id]);
+    NhsCatalogueGap::query()->create([
+        'nhs_product_opportunity_id' => $removed->id,
+        'gap_type' => NhsGapType::Directive,
+        'coverage' => NhsCoverage::PotentialGap,
+        'sourcing_action' => NhsSourcingAction::Monitor,
+    ]);
+    $settings = NhsPurchasingSetting::current();
+    $settings->last_summary = 'Old NHS summary';
+    $settings->last_changes = 'Old change note';
+    $settings->last_limitations = 'Old limitation';
+    $settings->last_ran_at = now();
+    $settings->save();
+
+    return [$kept, $removed, $directive];
+}
 
 function deneCataloguePattern(): array
 {

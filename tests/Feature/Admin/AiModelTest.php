@@ -25,7 +25,25 @@ test('admins can view the ai models page', function () {
     $this->actingAs(User::factory()->admin()->create())
         ->get(route('admin.ai-models'))
         ->assertOk()
-        ->assertSee('AI Models');
+        ->assertSee('AI Models')
+        ->assertSeeInOrder([
+            'gpt-6-astra',
+            'Most capable. Slowest. Hard research.',
+            'gpt-6.1-sol',
+            'Balanced everyday work.',
+            'gpt-6.1-terra',
+            'Faster writing and visual tasks.',
+            'gpt-6-luna',
+            'Fastest. Use this when a job times out.',
+        ]);
+});
+
+test('choosing a model code fills the model box', function () {
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test('pages::admin.ai-models')
+        ->call('selectModel', 'gpt-6-luna')
+        ->assertSet('model', 'gpt-6-luna');
 });
 
 test('admins see the ai models link', function () {
