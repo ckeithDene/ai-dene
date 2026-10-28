@@ -12,47 +12,28 @@ class NhsPurchasingResearcher
     public function __construct(private NhsPurchasingPrompt $prompt) {}
 
     /**
-     * Search for official NHS directives only.
+     * Search one theme from the official NHS purchasing brief.
      *
      * @param  array<int, string>  $existing
      * @return array<string, mixed>
      */
-    public function searchDirectives(AiModel $aiModel, array $existing): array
+    public function searchStage(AiModel $aiModel, string $stage, array $existing): array
     {
-        return $this->search($aiModel, $this->prompt->directives(), [
+        return $this->search($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
-            'search_target' => 'directives',
-            'task' => 'Find 8 different official NHS directives that could change GP purchasing. Do not search news, blogs, or Greener NHS.',
+            'search_target' => $stage,
+            'task' => $this->stageTask($stage),
             'existing_directives' => $existing,
         ], true);
     }
 
-    /**
-     * Search NHS news and blogs for purchasing opportunities.
-     *
-     * @return array<string, mixed>
-     */
-    public function searchNews(AiModel $aiModel): array
+    private function stageTask(string $stage): string
     {
-        return $this->search($aiModel, $this->prompt->news(), [
-            'search_date' => now()->format('d/m/Y'),
-            'search_target' => 'news',
-            'task' => 'Find 8 different purchasing opportunities from NHS news and blog pages. Do not search Greener NHS.',
-        ], true);
-    }
-
-    /**
-     * Search Greener NHS for purchasing opportunities.
-     *
-     * @return array<string, mixed>
-     */
-    public function searchGreener(AiModel $aiModel): array
-    {
-        return $this->search($aiModel, $this->prompt->greener(), [
-            'search_date' => now()->format('d/m/Y'),
-            'search_target' => 'greener',
-            'task' => 'Find 5 different purchasing opportunities from Greener NHS, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/.',
-        ], true);
+        return match ($stage) {
+            'procurement' => 'This stage is funding, procurement rules, supply-chain plans, standardisation and value-based buying. Use the Department of Health and Social Care, NHS Supply Chain, the NHS Business Services Authority and integrated care boards. Sustainability is only one possible theme, so do not make it the subject of this search.',
+            'operations' => 'This stage is digital, workforce, resilience and regulation. Sustainability is only one possible theme, so do not make it the subject of this search.',
+            default => 'This stage is clinical guidance, community care and diagnostics. Use NHS England and NICE. Sustainability is only one possible theme, so do not make it the subject of this search.',
+        };
     }
 
     /**
@@ -66,8 +47,8 @@ class NhsPurchasingResearcher
     {
         return $this->search($aiModel, $this->prompt->interpret(), [
             'search_date' => now()->format('d/m/Y'),
-            'search_target' => 'directive-opportunities',
-            'task' => 'Return 8 different purchasing opportunities from the supplied directives.',
+            'search_target' => 'opportunities',
+            'task' => 'Predict a purchasing change for every product or service category the supplied directives support. Do not collapse several categories into one item.',
             'directives_to_interpret' => $directives,
             'existing_opportunities' => $existingOpportunities,
         ], false);

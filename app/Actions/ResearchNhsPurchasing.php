@@ -28,7 +28,7 @@ class ResearchNhsPurchasing
     ) {}
 
     /**
-     * Check NHS directives, news, blogs and Greener NHS, then compare them with the Dene catalogue.
+     * Check official NHS sources in stages, then compare them with the Dene catalogue.
      */
     public function handle(): NhsPurchasingResult
     {
@@ -37,7 +37,7 @@ class ResearchNhsPurchasing
         $failures = [];
         $completed = 0;
 
-        foreach (['directives', 'directive-opportunities', 'news', 'greener', 'catalogue'] as $step) {
+        foreach (['clinical', 'procurement', 'operations', 'opportunities', 'catalogue'] as $step) {
             $result = $this->runStep($step);
 
             if ($result->skippedReason === __('Connect ChatGPT before researching NHS purchasing patterns.')) {
@@ -78,10 +78,8 @@ class ResearchNhsPurchasing
 
         try {
             return match ($step) {
-                'directives' => $this->directivesStep($aiModel),
-                'directive-opportunities' => $this->directiveOpportunitiesStep($aiModel),
-                'news' => $this->sourcedOpportunitiesStep($aiModel, 'news'),
-                'greener' => $this->sourcedOpportunitiesStep($aiModel, 'greener'),
+                'clinical', 'procurement', 'operations' => $this->stageStep($aiModel, $step),
+                'opportunities' => $this->opportunitiesStep($aiModel),
                 'catalogue' => $this->catalogueStep($aiModel),
                 default => new NhsPurchasingResult(0, 0),
             };
@@ -92,54 +90,38 @@ class ResearchNhsPurchasing
         }
     }
 
-    private function directivesStep(AiModel $aiModel): NhsPurchasingResult
+    private function stageStep(AiModel $aiModel, string $stage): NhsPurchasingResult
     {
         $existing = NhsDirective::query()
-            ->latest('id')
-            ->limit(8)
+            ->orderBy('title')
             ->pluck('title')
             ->map(fn (mixed $title): string => (string) $title)
             ->all();
-        $research = $this->researcher->searchDirectives($aiModel, $existing);
-        $saved = $this->storeDirectives($research, 'directive');
-        $this->pruneDirectives($saved, 'directive');
-        NhsProductOpportunity::query()->whereDoesntHave('directives')->delete();
+        $research = $this->researcher->searchStage($aiModel, $stage, $existing);
+        $directives = $this->storeDirectives($research);
+        $opportunities = $this->storeOpportunities($research);
         $this->rememberSummary($research);
 
-        return new NhsPurchasingResult(count($saved), 0);
+        return new NhsPurchasingResult(count($directives), count($opportunities));
     }
 
-    private function directiveOpportunitiesStep(AiModel $aiModel): NhsPurchasingResult
+    private function opportunitiesStep(AiModel $aiModel): NhsPurchasingResult
     {
-        $directives = NhsDirective::query()->get()
-            ->filter(fn (NhsDirective $directive): bool => $directive->researchGroup() === 'directive')
-            ->values()
-            ->all();
+        $directives = NhsDirective::query()->get()->all();
 
         if ($directives === []) {
             return new NhsPurchasingResult(0, 0);
         }
 
-        $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), []);
-        $saved = $this->storeOpportunities($impact, 'directive');
-        $this->pruneOpportunities($saved, 'directive');
+        $existing = NhsProductOpportunity::query()
+            ->orderBy('name')
+            ->pluck('name')
+            ->map(fn (mixed $name): string => (string) $name)
+            ->all();
+        $impact = $this->researcher->interpret($aiModel, $this->directivePayload($directives), $existing);
+        $saved = $this->storeOpportunities($impact);
 
         return new NhsPurchasingResult(count($directives), count($saved));
-    }
-
-    private function sourcedOpportunitiesStep(AiModel $aiModel, string $group): NhsPurchasingResult
-    {
-        $research = $group === 'news'
-            ? $this->researcher->searchNews($aiModel)
-            : $this->researcher->searchGreener($aiModel);
-        $directives = $this->storeDirectives($research, $group);
-        $this->pruneDirectives($directives, $group);
-        NhsProductOpportunity::query()->whereDoesntHave('directives')->delete();
-        $opportunities = $this->storeOpportunities($research, $group);
-        $this->pruneOpportunities($opportunities, $group);
-        $this->rememberSummary($research);
-
-        return new NhsPurchasingResult(count($directives), count($opportunities));
     }
 
     private function catalogueStep(AiModel $aiModel): NhsPurchasingResult
@@ -185,10 +167,10 @@ class ResearchNhsPurchasing
      * @param  array<string, mixed>  $research
      * @return array<int, NhsDirective>
      */
-    private function storeDirectives(array $research, string $group): array
+    private function storeDirectives(array $research): array
     {
         $saved = [];
-        $items = $this->selectDirectives(is_array($research['directives'] ?? null) ? $research['directives'] : [], $group);
+        $items = $this->selectDirectives(is_array($research['directives'] ?? null) ? $research['directives'] : []);
 
         foreach ($items as $item) {
             $normalized = $this->normalizer->directive($item);
@@ -231,14 +213,13 @@ class ResearchNhsPurchasing
      * @param  array<string, mixed>  $impact
      * @return array<int, NhsProductOpportunity>
      */
-    private function storeOpportunities(array $impact, string $group): array
+    private function storeOpportunities(array $impact): array
     {
         $saved = [];
         $directives = NhsDirective::query()->get();
         $items = $this->selectOpportunities(
             is_array($impact['opportunities'] ?? null) ? $impact['opportunities'] : [],
             $directives,
-            $group,
         );
 
         foreach ($items as $item) {
@@ -388,30 +369,17 @@ class ResearchNhsPurchasing
     }
 
     /**
-     * Keep the requested source group up to its limit.
+     * Keep every directive the stage actually returned.
      *
      * @param  array<int, mixed>  $items
      * @return array<int, array<string, mixed>>
      */
-    private function selectDirectives(array $items, string $group): array
+    private function selectDirectives(array $items): array
     {
         $selected = [];
-        $limits = [
-            'directive' => 8,
-            'news' => 8,
-            'greener' => 5,
-        ];
 
         foreach ($items as $item) {
-            if (! is_array($item) || $this->normalizer->directive($item) === null || count($selected) >= $limits[$group]) {
-                continue;
-            }
-
-            $title = is_string($item['title'] ?? null) ? $item['title'] : null;
-            $url = is_string($item['source_url'] ?? null) ? $item['source_url'] : null;
-            $sourceTitle = is_string($item['source_title'] ?? null) ? $item['source_title'] : null;
-
-            if (NhsDirective::researchGroupFor($title, $url, $sourceTitle) !== $group) {
+            if (! is_array($item) || $this->normalizer->directive($item) === null) {
                 continue;
             }
 
@@ -422,60 +390,13 @@ class ResearchNhsPurchasing
     }
 
     /**
-     * @param  array<int, NhsDirective>  $saved
-     */
-    private function pruneDirectives(array $saved, string $group): void
-    {
-        if ($saved === []) {
-            return;
-        }
-
-        $ids = collect($saved)->pluck('id');
-
-        NhsDirective::query()->get()
-            ->filter(fn (NhsDirective $directive): bool => $directive->researchGroup() === $group && ! $ids->contains($directive->id))
-            ->each->delete();
-    }
-
-    /**
-     * @param  array<int, NhsProductOpportunity>  $saved
-     */
-    private function pruneOpportunities(array $saved, string $group): void
-    {
-        if ($saved === []) {
-            return;
-        }
-
-        $ids = collect($saved)->pluck('id');
-
-        NhsProductOpportunity::query()->with('directives')->get()
-            ->filter(function (NhsProductOpportunity $opportunity) use ($group, $ids): bool {
-                if ($ids->contains($opportunity->id)) {
-                    return false;
-                }
-
-                $best = $opportunity->directives
-                    ->map(fn (NhsDirective $directive): string => $directive->researchGroup())
-                    ->sortBy(fn (string $item): int => match ($item) {
-                        'news' => 1,
-                        'greener' => 2,
-                        default => 0,
-                    })
-                    ->first();
-
-                return $best === $group;
-            })
-            ->each->delete();
-    }
-
-    /**
-     * Combine similar opportunities and keep directive-backed ones ahead of news and Greener NHS.
+     * Combine the same product and keep every category the directives support.
      *
      * @param  array<int, mixed>  $items
      * @param  Collection<int, NhsDirective>  $directives
      * @return array<int, array<string, mixed>>
      */
-    private function selectOpportunities(array $items, Collection $directives, string $onlyGroup): array
+    private function selectOpportunities(array $items, Collection $directives): array
     {
         $combined = [];
 
@@ -498,39 +419,14 @@ class ResearchNhsPurchasing
 
         $selected = array_values($combined);
 
-        usort($selected, function (array $left, array $right) use ($directives): int {
-            $rank = $this->opportunityRank($left, $directives) <=> $this->opportunityRank($right, $directives);
-
-            if ($rank !== 0) {
-                return $rank;
-            }
-
+        usort($selected, function (array $left, array $right): int {
             return ((int) ($right['opportunity_score'] ?? 0)) <=> ((int) ($left['opportunity_score'] ?? 0));
         });
 
-        $limits = [
-            'directive' => 8,
-            'news' => 8,
-            'greener' => 5,
-        ];
-        $picked = [];
-
-        foreach ($selected as $item) {
-            $group = match ($this->opportunityRank($item, $directives)) {
-                0 => 'directive',
-                1 => 'news',
-                2 => 'greener',
-                default => null,
-            };
-
-            if ($group !== $onlyGroup || count($picked) >= $limits[$onlyGroup]) {
-                continue;
-            }
-
-            $picked[] = $item;
-        }
-
-        return $picked;
+        return array_values(array_filter(
+            $selected,
+            fn (array $item): bool => $this->opportunityIsLinked($item, $directives),
+        ));
     }
 
     /**
@@ -560,19 +456,21 @@ class ResearchNhsPurchasing
      * @param  array<string, mixed>  $item
      * @param  Collection<int, NhsDirective>  $directives
      */
-    private function opportunityRank(array $item, Collection $directives): int
+    /**
+     * @param  array<string, mixed>  $item
+     * @param  Collection<int, NhsDirective>  $directives
+     */
+    private function opportunityIsLinked(array $item, Collection $directives): bool
     {
-        $rank = 3;
-
         foreach ($this->normalizer->directiveTitles($item) as $title) {
             foreach ($directives as $directive) {
                 if ($this->titlesMatch($title, $directive->title)) {
-                    $rank = min($rank, $directive->researchGroupRank());
+                    return true;
                 }
             }
         }
 
-        return $rank;
+        return false;
     }
 
     /**

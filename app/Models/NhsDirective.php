@@ -65,18 +65,6 @@ class NhsDirective extends Model
         return self::researchGroupFor($this->title, $this->source_url, $this->source_title);
     }
 
-    /**
-     * Official directives sort first, then news and blogs, then Greener NHS.
-     */
-    public function researchGroupRank(): int
-    {
-        return match ($this->researchGroup()) {
-            'news' => 1,
-            'greener' => 2,
-            default => 0,
-        };
-    }
-
     public static function researchGroupFor(?string $title, ?string $url, ?string $sourceTitle): string
     {
         $heading = strtolower(trim(implode(' ', array_filter([$title, $sourceTitle]))));

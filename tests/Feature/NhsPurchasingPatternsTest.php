@@ -40,7 +40,7 @@ test('the page explains when no purchasing patterns have been found', function (
         ->assertDontSee('Run research');
 });
 
-test('nhs purchasing research asks for directives news and greener nhs separately', function () {
+test('nhs purchasing research uses the original brief one stage at a time', function () {
     $aiModel = AiModel::factory()->create();
 
     Http::fake([
@@ -58,18 +58,20 @@ test('nhs purchasing research asks for directives news and greener nhs separatel
         ]),
     ]);
 
-    app(NhsPurchasingResearcher::class)->searchDirectives($aiModel, []);
+    app(NhsPurchasingResearcher::class)->searchStage($aiModel, 'clinical', []);
 
     Http::assertSent(function (Request $request): bool {
         $instructions = $request->data()['instructions'] ?? '';
         $input = json_decode((string) ($request->data()['input'] ?? ''), true);
 
         return $request->url() === 'https://api.openai.com/v1/responses'
-            && str_contains($instructions, 'Return 8 different directives')
-            && str_contains($instructions, 'Do not search news, blogs, or Greener NHS')
+            && str_contains($instructions, 'Sustainability is only one possible theme')
+            && str_contains($instructions, 'clinical, community, diagnostics, digital, workforce')
+            && str_contains($instructions, 'Use one web search for the stage named in the user message')
             && ($request->data()['tools'][0]['search_context_size'] ?? null) === 'low'
             && is_array($input)
-            && ($input['search_target'] ?? null) === 'directives';
+            && ($input['search_target'] ?? null) === 'clinical'
+            && str_contains((string) ($input['task'] ?? ''), 'clinical guidance, community care and diagnostics');
     });
 });
 
@@ -111,10 +113,10 @@ test('nhs purchasing research uses a separate chatgpt call for each source', fun
 
     expect(NhsDirective::query()->where('title', 'Community diagnostic centres')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic couch')->exists())->toBeTrue()
-        ->and($targets)->toBe(['directives', 'directive-opportunities', 'news', 'greener']);
+        ->and($targets)->toBe(['clinical', 'procurement', 'operations', 'opportunities']);
 });
 
-test('nhs purchasing research keeps directives ahead of a limited news and greener set', function () {
+test('nhs purchasing research keeps every initiative the staged search returns', function () {
     $this->actingAs(User::factory()->create());
     AiModel::factory()->create();
 
@@ -207,16 +209,16 @@ test('nhs purchasing research keeps directives ahead of a limited news and green
     $groups = NhsDirective::query()->get()->countBy(fn (NhsDirective $directive): string => $directive->researchGroup());
 
     expect($groups->get('directive'))->toBe(4)
-        ->and($groups->get('news'))->toBe(8)
-        ->and($groups->get('greener'))->toBe(5)
-        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Diagnostic product%')->count())->toBe(8)
-        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 01')->exists())->toBeTrue()
-        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 09')->exists())->toBeFalse()
-        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Staffing product%')->count())->toBe(8)
-        ->and(NhsProductOpportunity::query()->where('name', 'Staffing product 09')->exists())->toBeFalse()
+        ->and($groups->get('news'))->toBe(10)
+        ->and($groups->get('greener'))->toBe(12)
+        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Diagnostic product%')->count())->toBe(14)
+        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic product 09')->exists())->toBeTrue()
+        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Staffing product%')->count())->toBe(9)
+        ->and(NhsProductOpportunity::query()->where('name', 'Staffing product 09')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'Couch roll')->exists())->toBeTrue()
         ->and(NhsProductOpportunity::query()->where('name', 'like', '%couch%')->count())->toBe(1)
-        ->and(NhsProductOpportunity::query()->where('name', 'Green gadget 1')->exists())->toBeTrue();
+        ->and(NhsProductOpportunity::query()->where('name', 'Green gadget 1')->exists())->toBeTrue()
+        ->and(NhsProductOpportunity::query()->where('name', 'like', 'Green gadget%')->count())->toBe(3);
 
     $this->get(route('nhs-purchasing-patterns'))
         ->assertOk()
@@ -491,7 +493,7 @@ test('catalogue matching waits until the dene connection exists', function () {
     finishNhsResearch(Livewire::test('pages::nhs-purchasing-patterns')->call('run'))
         ->assertSee('Catalogue matching required.');
 
-    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(3);
+    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(4);
 });
 
 test('a written research answer is saved as directives', function () {
@@ -500,30 +502,6 @@ test('a written research answer is saved as directives', function () {
 
     Http::fake(function (Request $request) {
         $input = $request->data()['input'] ?? '';
-
-        if (str_contains($input, '"search_target":"greener"')) {
-            return Http::response([
-                'output_text' => json_encode([
-                    'summary' => 'Net zero supplier rules are the main change.',
-                    'directives' => [[
-                        'title' => 'Net Zero Supplier Roadmap',
-                        'issuer' => 'NHS England',
-                        'summary' => 'From April 2027 suppliers face tiered carbon reporting on new contracts.',
-                        'source_url' => 'https://www.england.nhs.uk/nhs-net-zero',
-                        'obligation_type' => 'procurement_policy',
-                        'relevant' => true,
-                    ]],
-                    'opportunities' => [[
-                        'directive_titles' => ['Net Zero Supplier Roadmap'],
-                        'name' => 'Lower-carbon examination gloves',
-                        'category' => 'Consumables',
-                        'demand_direction' => 'moderate_increase',
-                        'opportunity_score' => 70,
-                        'search_terms' => ['examination gloves'],
-                    ]],
-                ]),
-            ]);
-        }
 
         if (str_contains($input, 'research_notes')) {
             return Http::response([
@@ -566,7 +544,7 @@ test('a written research answer is saved as directives', function () {
         ->assertSee('Lower-carbon examination gloves')
         ->assertSee('Net zero supplier rules are the main change.');
 
-    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(5);
+    expect(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(7);
 });
 
 test('the purchasing page escapes pattern names', function () {
