@@ -12,7 +12,7 @@ class NhsPurchasingResearcher
     public function __construct(private NhsPurchasingPrompt $prompt) {}
 
     /**
-     * Search official sources for GP purchasing directives.
+     * Search NHS sources, including news and blogs, for GP purchasing changes.
      *
      * @param  array<int, array<string, string|null>>  $existing
      * @return array<string, mixed>
@@ -21,7 +21,7 @@ class NhsPurchasingResearcher
     {
         $notes = $this->request($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
-            'task' => 'Search official NHS sources for current directives and trends that could change purchasing, then explain which product categories may be bought more or less.',
+            'task' => 'Search NHS sites, including NHS news and blogs, for current programmes, directives and trends that could change purchasing, then explain which product categories may be bought more or less.',
             'existing_directives' => $existing,
         ], true);
         $decoded = $this->decode($notes);

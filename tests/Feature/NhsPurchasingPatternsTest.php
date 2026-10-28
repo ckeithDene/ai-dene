@@ -12,6 +12,7 @@ use App\Models\NhsProductOpportunity;
 use App\Models\NhsPurchasingSetting;
 use App\Models\OdooConnection;
 use App\Models\User;
+use App\Services\NhsPurchasingResearcher;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Http\Client\Request;
@@ -36,6 +37,34 @@ test('the page explains when no purchasing patterns have been found', function (
         ->assertOk()
         ->assertSee('No NHS purchasing patterns have been found yet.')
         ->assertDontSee('Run research');
+});
+
+test('nhs purchasing research searches nhs news and blogs', function () {
+    $aiModel = AiModel::factory()->create();
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'summary' => 'Greener NHS progress.',
+                'directives' => [],
+                'opportunities' => [],
+            ]),
+        ]),
+    ]);
+
+    app(NhsPurchasingResearcher::class)->monitor($aiModel, []);
+
+    Http::assertSent(function (Request $request): bool {
+        $instructions = $request->data()['instructions'] ?? '';
+        $input = json_decode((string) ($request->data()['input'] ?? ''), true);
+
+        return $request->url() === 'https://api.openai.com/v1/responses'
+            && str_contains($instructions, 'NHS news and blogs')
+            && str_contains($instructions, 'england.nhs.uk/greenernhs')
+            && str_contains($instructions, 'england.nhs.uk/blog')
+            && is_array($input)
+            && str_contains((string) ($input['task'] ?? ''), 'NHS news and blogs');
+    });
 });
 
 test('research keeps directives and matches them to the dene catalogue', function () {

@@ -219,7 +219,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <flux:heading size="xl">{{ __('NHS Purchasing Patterns') }}</flux:heading>
-            <flux:subheading>{{ __('NHS directives and guidance, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
+            <flux:subheading>{{ __('NHS directives, news and blogs, translated into predicted GP purchasing changes for Dene Healthcare. A weekly check keeps the record and updates it.') }}</flux:subheading>
         </div>
     </div>
 
@@ -391,7 +391,7 @@ new #[Title('NHS Purchasing Patterns')] class extends Component {
     @if (auth()->user()->isAdmin())
         <flux:card class="flex flex-col gap-3">
             <flux:heading size="lg">{{ __('Check NHS sources') }}</flux:heading>
-            <flux:text>{{ __('A weekly check looks for new directives, updates the purchasing forecast, and compares it with the Dene Healthcare catalogue.') }}</flux:text>
+            <flux:text>{{ __('A weekly check looks for new directives, NHS news and blogs, updates the purchasing forecast, and compares it with the Dene Healthcare catalogue.') }}</flux:text>
             <div class="flex flex-wrap gap-3">
                 <flux:button wire:click="run" icon="arrow-path" variant="primary" data-test="run-nhs-research">
                     {{ __('Run research') }}
