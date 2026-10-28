@@ -14,14 +14,14 @@ class NhsPurchasingResearcher
     /**
      * Search NHS sources, including news and blogs, for GP purchasing changes.
      *
-     * @param  array<int, array<string, string|null>>  $existing
+     * @param  array<int, string>  $existing
      * @return array<string, mixed>
      */
     public function monitor(AiModel $aiModel, array $existing): array
     {
         $notes = $this->request($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
-            'task' => 'Prioritise official NHS directives. Then add at most 8 NHS news and blog items, and at most 7 Greener NHS or sustainability items, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/. Return at most 15 purchasing opportunities and combine opportunities about the same product or service.',
+            'task' => 'Use at most 4 web searches, then stop. Prioritise official NHS directives. Then add at most 8 NHS news and blog items, and at most 7 Greener NHS or sustainability items, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/. Reply with JSON containing at most 15 purchasing opportunities and combine opportunities about the same product or service.',
             'existing_directives' => $existing,
         ], true);
         $decoded = $this->decode($notes);
@@ -62,7 +62,7 @@ class NhsPurchasingResearcher
             'search_date' => now()->format('d/m/Y'),
             'directives_to_interpret' => $directives,
             'existing_opportunities' => $existingOpportunities,
-        ], true);
+        ], false);
         $decoded = $this->decode($notes);
 
         if (! is_array($decoded)) {
@@ -122,7 +122,10 @@ class NhsPurchasingResearcher
 
         if ($search) {
             $payload['tools'] = [
-                ['type' => 'web_search'],
+                [
+                    'type' => 'web_search',
+                    'search_context_size' => 'low',
+                ],
             ];
         }
 

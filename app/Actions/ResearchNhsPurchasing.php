@@ -43,14 +43,8 @@ class ResearchNhsPurchasing
         try {
             $existing = NhsDirective::query()
                 ->latest('id')
-                ->limit(40)
-                ->get()
-                ->map(fn (NhsDirective $directive): array => [
-                    'title' => $directive->title,
-                    'issuer' => $directive->issuer,
-                    'effective_on' => $directive->effective_on,
-                    'source_url' => $directive->source_url,
-                ])
+                ->limit(15)
+                ->pluck('title')
                 ->all();
             $research = $this->researcher->monitor($aiModel, $existing);
         } catch (RuntimeException $exception) {

@@ -61,13 +61,48 @@ test('nhs purchasing research prioritises directives over news and greener nhs',
         $task = is_array($input) ? (string) ($input['task'] ?? '') : '';
 
         return $request->url() === 'https://api.openai.com/v1/responses'
+            && str_contains($instructions, 'Use at most 4 web searches')
             && str_contains($instructions, 'Prioritise official NHS directives')
+            && str_contains($instructions, 'Reply with JSON only')
             && str_contains($instructions, 'at most 8')
             && str_contains($instructions, 'at most 7')
             && str_contains($instructions, 'at most 15')
+            && ($request->data()['tools'][0]['search_context_size'] ?? null) === 'low'
+            && str_contains($task, 'at most 4 web searches')
             && str_contains($task, 'Prioritise official NHS directives')
             && str_contains($task, 'at most 15');
     });
+});
+
+test('a complete nhs search result is saved from one chatgpt call', function () {
+    AiModel::factory()->create();
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'summary' => 'Community diagnostics are the main change.',
+                'directives' => [[
+                    'title' => 'Community diagnostic centres',
+                    'summary' => 'More tests are moving out of hospital.',
+                    'source_url' => 'https://www.england.nhs.uk/diagnostics',
+                    'obligation_type' => 'strategic',
+                ]],
+                'opportunities' => [[
+                    'directive_titles' => ['Community diagnostic centres'],
+                    'name' => 'Diagnostic couch',
+                    'demand_direction' => 'moderate_increase',
+                    'opportunity_score' => 60,
+                    'confidence' => 'Medium',
+                ]],
+            ]),
+        ]),
+    ]);
+
+    app(ResearchNhsPurchasing::class)->handle();
+
+    expect(NhsDirective::query()->where('title', 'Community diagnostic centres')->exists())->toBeTrue()
+        ->and(NhsProductOpportunity::query()->where('name', 'Diagnostic couch')->exists())->toBeTrue()
+        ->and(collect(Http::recorded())->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')->count())->toBe(1);
 });
 
 test('nhs purchasing research keeps directives ahead of a limited news and greener set', function () {
