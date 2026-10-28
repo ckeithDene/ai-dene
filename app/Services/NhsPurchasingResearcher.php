@@ -21,7 +21,7 @@ class NhsPurchasingResearcher
     {
         $notes = $this->request($aiModel, $this->prompt->monitor(), [
             'search_date' => now()->format('d/m/Y'),
-            'task' => 'Search NHS sites, including NHS news and blogs, for current programmes, directives and trends that could change purchasing, then explain which product categories may be bought more or less.',
+            'task' => 'Research sustainability and Greener NHS, including https://www.england.nhs.uk/greenernhs/ and https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/. Also search other NHS sites, news and blogs for current programmes, directives and trends that could change purchasing, then explain which product categories may be bought more or less.',
             'existing_directives' => $existing,
         ], true);
         $decoded = $this->decode($notes);

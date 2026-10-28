@@ -39,7 +39,7 @@ test('the page explains when no purchasing patterns have been found', function (
         ->assertDontSee('Run research');
 });
 
-test('nhs purchasing research searches nhs news and blogs', function () {
+test('nhs purchasing research searches sustainability and greener nhs', function () {
     $aiModel = AiModel::factory()->create();
 
     Http::fake([
@@ -59,11 +59,11 @@ test('nhs purchasing research searches nhs news and blogs', function () {
         $input = json_decode((string) ($request->data()['input'] ?? ''), true);
 
         return $request->url() === 'https://api.openai.com/v1/responses'
-            && str_contains($instructions, 'NHS news and blogs')
-            && str_contains($instructions, 'england.nhs.uk/greenernhs')
-            && str_contains($instructions, 'england.nhs.uk/blog')
+            && str_contains($instructions, 'Research sustainability and Greener NHS')
+            && str_contains($instructions, 'https://www.england.nhs.uk/greenernhs/')
+            && str_contains($instructions, 'https://www.england.nhs.uk/blog/5-years-net-zero-progress-promise/')
             && is_array($input)
-            && str_contains((string) ($input['task'] ?? ''), 'NHS news and blogs');
+            && str_contains((string) ($input['task'] ?? ''), 'Research sustainability and Greener NHS');
     });
 });
 
