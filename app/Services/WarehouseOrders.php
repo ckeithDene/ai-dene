@@ -159,12 +159,17 @@ class WarehouseOrders
             throw new RuntimeException('Choose a date range of one year or less.');
         }
 
+        set_time_limit(180);
+
         $client = $this->client();
-        $orders = $client->searchRead('sale.order', [
-            ['state', 'in', ['sale', 'done']],
-            ['date_order', '>=', $start->format('Y-m-d H:i:s')],
-            ['date_order', '<=', $end->format('Y-m-d H:i:s')],
-        ], ['id', 'name', 'date_order', 'order_line'], 'date_order asc', 150, 0);
+        $page = $this->pages(function (int $limit, int $offset) use ($client, $start, $end): array {
+            return $client->searchRead('sale.order', [
+                ['state', 'in', ['sale', 'done']],
+                ['date_order', '>=', $start->format('Y-m-d H:i:s')],
+                ['date_order', '<=', $end->format('Y-m-d H:i:s')],
+            ], ['id', 'name', 'date_order', 'order_line'], 'date_order asc', $limit, $offset);
+        });
+        $orders = $page['rows'];
         $lineIds = [];
         $orderNames = [];
 
@@ -247,7 +252,7 @@ class WarehouseOrders
             'from' => $start->format('d/m/Y'),
             'to' => $end->format('d/m/Y'),
             'order_count' => count($orderNames),
-            'truncated' => count($orders) >= 150,
+            'truncated' => $page['truncated'],
             'picks' => $picks,
         ];
     }
@@ -342,13 +347,13 @@ class WarehouseOrders
         ];
 
         try {
-            $rows = $client->searchRead('stock.quant', [
+            $rows = $this->pages(fn (int $limit, int $offset): array => $client->searchRead('stock.quant', [
                 ...$domain,
                 ['location_id.usage', '=', 'internal'],
-            ], ['product_id', 'location_id', 'quantity'], 'quantity desc', 500, 0);
+            ], ['product_id', 'location_id', 'quantity'], 'quantity desc', $limit, $offset))['rows'];
         } catch (RuntimeException) {
             try {
-                $rows = $client->searchRead('stock.quant', $domain, ['product_id', 'location_id', 'quantity'], 'quantity desc', 500, 0);
+                $rows = $this->pages(fn (int $limit, int $offset): array => $client->searchRead('stock.quant', $domain, ['product_id', 'location_id', 'quantity'], 'quantity desc', $limit, $offset))['rows'];
             } catch (RuntimeException) {
                 return [];
             }
@@ -360,7 +365,7 @@ class WarehouseOrders
             $productId = $this->relationId($row['product_id'] ?? null);
             $location = $this->relationName($row['location_id'] ?? null);
 
-            if ($productId === null || $location === null || isset($locations[$productId])) {
+            if ($productId === null || $location === null || isset($locations[$productId]) || $this->packingZone($location)) {
                 continue;
             }
 
@@ -368,6 +373,37 @@ class WarehouseOrders
         }
 
         return $locations;
+    }
+
+    /**
+     * Read every page of a search until the date range is exhausted.
+     *
+     * @param  callable(int, int): array<int, array<string, mixed>>  $read
+     * @return array{rows: array<int, array<string, mixed>>, truncated: bool}
+     */
+    private function pages(callable $read): array
+    {
+        $rows = [];
+        $offset = 0;
+        $limit = 80;
+        $truncated = false;
+
+        do {
+            $batch = $read($limit, $offset);
+            array_push($rows, ...$batch);
+            $offset += $limit;
+            $truncated = count($batch) === $limit && $offset >= 20000;
+        } while (count($batch) === $limit && $offset < 20000);
+
+        return [
+            'rows' => $rows,
+            'truncated' => $truncated,
+        ];
+    }
+
+    private function packingZone(string $location): bool
+    {
+        return str_contains(strtoupper($location), 'PACKING');
     }
 
     private function day(string $value): Carbon

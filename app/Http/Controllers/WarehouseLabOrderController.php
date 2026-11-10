@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\WarehouseLayoutAdvisor;
 use App\Services\WarehouseMovePlanner;
 use App\Services\WarehouseOrders;
 use Illuminate\Http\JsonResponse;
@@ -25,17 +26,37 @@ class WarehouseLabOrderController extends Controller
     /**
      * Simulate orders between two dates and suggest stock moves.
      */
-    public function moves(Request $request, WarehouseOrders $orders, WarehouseMovePlanner $planner): JsonResponse
+    public function moves(Request $request, WarehouseOrders $orders, WarehouseMovePlanner $planner, WarehouseLayoutAdvisor $advisor): JsonResponse
     {
-        return $this->respond(function () use ($request, $orders, $planner): array {
+        return $this->respond(function () use ($request, $orders, $planner, $advisor): array {
+            if ($request->boolean('ai')) {
+                $advisor->ensureConnected();
+            }
+
             $period = $orders->period(
                 $request->string('from')->toString(),
                 $request->string('to')->toString(),
             );
+            $plan = $planner->suggest($period['picks']);
+            $notes = [];
+            $warning = null;
+
+            if ($request->boolean('ai')) {
+                $advice = $advisor->advise($period['picks'], $plan['suggestions']);
+
+                if ($advice['suggestions'] !== null) {
+                    $plan['suggestions'] = $advice['suggestions'];
+                }
+
+                $notes = $advice['notes'];
+                $warning = $advice['warning'];
+            }
 
             return [
                 ...$period,
-                ...$planner->suggest($period['picks']),
+                ...$plan,
+                'notes' => $notes,
+                'ai_warning' => $warning,
             ];
         });
     }
@@ -60,7 +81,8 @@ class WarehouseLabOrderController extends Controller
             $status = match ($message) {
                 'Connect the Dene Healthcare Odoo connection before loading orders. The MidMeds connection is not used here.' => 422,
                 'That order was not found.' => 404,
-                'Choose a start and end date.', 'The end date must be on or after the start date.', 'Choose a date range of one year or less.' => 422,
+                'Choose a start and end date.', 'The end date must be on or after the start date.', 'Choose a date range of one year or less.', 'Connect ChatGPT before asking for location advice.' => 422,
+                'Could not reach ChatGPT.' => 502,
                 default => 502,
             };
 
@@ -77,6 +99,8 @@ class WarehouseLabOrderController extends Controller
             'Choose a start and end date.',
             'The end date must be on or after the start date.',
             'Choose a date range of one year or less.',
+            'Connect ChatGPT before asking for location advice.',
+            'Could not reach ChatGPT.',
         ], true) ? $message : 'Could not read Dene Healthcare orders from Odoo.';
     }
 }

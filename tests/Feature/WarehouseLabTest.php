@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AiModel;
 use App\Models\OdooConnection;
 use App\Models\User;
 use App\Services\WarehouseMovePlanner;
@@ -48,13 +49,15 @@ test('a signed-in user can load the warehouse lab files', function () {
         ->toContain('Warehouse Lab')
         ->toContain('id="ordersearch"')
         ->toContain('id="movefrom"')
+        ->toContain('id="moveai"')
         ->toContain('./app.js');
 
     $script = $this->get(route('warehouse-lab.files', ['path' => 'app.js']));
     $script->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
     expect($script->streamedContent())->toContain('three')
         ->toContain('/warehouse-lab/orders')
-        ->toContain('/warehouse-lab/moves');
+        ->toContain('/warehouse-lab/moves')
+        ->toContain('moveai');
 
     $vendor = $this->get(route('warehouse-lab.files', ['path' => 'vendor/three.module.js']));
     $vendor->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
@@ -166,6 +169,7 @@ test('stock move suggestions keep pharma in the drug rooms and free the occupied
         ['product' => 'Cold chain vaccine', 'sku' => 'VAC-1', 'quantity' => 8, 'location' => 'WH/Stock/7L:10:AA:01:01', 'pharma' => true],
         ['product' => 'Amoxicillin', 'sku' => 'AMOX-1', 'quantity' => 20, 'location' => 'WH/Stock/8L:12:RM:03:01', 'pharma' => true],
         ['product' => 'Shelf trolley', 'sku' => 'TROL-1', 'quantity' => 1, 'location' => 'WH/Stock/7L:11:AA:01:01', 'pharma' => false],
+        ['product' => 'Returns tote', 'sku' => 'RET-1', 'quantity' => 30, 'location' => 'WH/Stock/PACKING ZONE', 'pharma' => false],
     ]);
 
     expect($result['pharma_left'])->toBe(3)
@@ -173,7 +177,32 @@ test('stock move suggestions keep pharma in the drug rooms and free the occupied
         ->and($result['suggestions'][0]['product'])->toBe('Couch roll')
         ->and($result['suggestions'][0]['to'])->toBe('WH/Stock/4L:01:RA:01:01')
         ->and($result['suggestions'][0]['displaced']['product'])->toBe('Examination gloves')
-        ->and($result['suggestions'][0]['displaced']['to'])->toBe('WH/Stock/9L:08:RM:03:01');
+        ->and($result['suggestions'][0]['displaced']['to'])->toBe('WH/Stock/9L:08:RM:03:01')
+        ->and($result['suggestions'][0]['follows'])->toBe([]);
+});
+
+test('stock moves in one plan leave the displaced product in a location that plan frees', function () {
+    $result = app(WarehouseMovePlanner::class)->suggest([
+        ['product' => 'Couch roll', 'sku' => 'COUCH-1', 'quantity' => 10, 'location' => 'WH/Stock/5L:06:RC:01:01', 'pharma' => false],
+        ['product' => 'Wipes', 'sku' => 'WIPE-1', 'quantity' => 5, 'location' => 'WH/Stock/9L:08:RM:03:01', 'pharma' => false],
+        ['product' => 'Tape', 'sku' => 'TAPE-1', 'quantity' => 1, 'location' => 'WH/Stock/4L:01:RA:01:01', 'pharma' => false],
+    ]);
+
+    $suggestion = $result['suggestions'][0];
+    $placed = [
+        $suggestion['product'] => $suggestion['to'],
+        $suggestion['displaced']['product'] => $suggestion['displaced']['to'],
+    ];
+
+    foreach ($suggestion['follows'] as $step) {
+        $placed[$step['product']] = $step['to'];
+    }
+
+    expect($result['suggestions'])->toHaveCount(1)
+        ->and($placed['Couch roll'])->toBe('WH/Stock/4L:01:RA:01:01')
+        ->and($placed['Wipes'])->toBe('WH/Stock/5L:06:RC:01:01')
+        ->and($placed['Tape'])->toBe('WH/Stock/9L:08:RM:03:01')
+        ->and(array_values($placed))->toBe(array_values(array_unique($placed)));
 });
 
 test('move suggestions refuse a date range that ends first', function () {
@@ -205,6 +234,101 @@ test('move suggestions come from dene orders and leave pharma stock where it is'
         ->assertJsonPath('picks.2.pharma', true);
 
     Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'midmeds.odoo.com'));
+    Http::assertNotSent(fn (Request $request): bool => $request->url() === 'https://api.openai.com/v1/responses');
+});
+
+test('move suggestions read every order in the date range', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://dene.odoo.com/jsonrpc' => pagedMoveOdoo(...),
+    ]);
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-10-01', 'to' => '2026-10-31']))
+        ->assertOk()
+        ->assertJsonPath('order_count', 81)
+        ->assertJsonPath('truncated', false)
+        ->assertJsonPath('suggestions.0.product', 'Couch roll');
+});
+
+test('ai assistance needs the saved chatgpt connection', function () {
+    $this->actingAs(User::factory()->create());
+    Http::preventStrayRequests();
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-10-01', 'to' => '2026-10-31', 'ai' => 1]))
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'Connect ChatGPT before asking for location advice.');
+
+    Http::assertNothingSent();
+});
+
+test('ai assistance asks chatgpt to rearrange stock and returns picking notes', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    AiModel::factory()->create();
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://dene.odoo.com/jsonrpc' => moveOdoo(...),
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'moves' => [
+                    ['product' => 'Couch roll', 'sku' => 'COUCH-1', 'from' => '9L:08:RM:03:01', 'to' => '4L:01:RA:01:01'],
+                    ['product' => 'Examination gloves', 'sku' => 'GLV-1', 'from' => '4L:01:RA:01:01', 'to' => '9L:08:RM:03:01'],
+                ],
+                'notes' => ['Pick the couch rolls on the way back from the close aisle.'],
+            ]),
+        ]),
+    ]);
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-10-01', 'to' => '2026-10-31', 'ai' => 1]))
+        ->assertOk()
+        ->assertJsonPath('suggestions.0.product', 'Couch roll')
+        ->assertJsonPath('suggestions.0.displaced.product', 'Examination gloves')
+        ->assertJsonPath('notes.0', 'Pick the couch rolls on the way back from the close aisle.')
+        ->assertJsonPath('ai_warning', null)
+        ->assertDontSee('test-api-key');
+
+    Http::assertSent(function (Request $request): bool {
+        if ($request->url() !== 'https://api.openai.com/v1/responses') {
+            return false;
+        }
+
+        $body = $request->data();
+        $instructions = $body['instructions'] ?? '';
+        $input = $body['input'] ?? '';
+
+        return is_string($instructions)
+            && str_contains($instructions, 'PACKING ZONE')
+            && str_contains($instructions, '7L')
+            && is_string($input)
+            && str_contains($input, '4L:01:RA:01:01')
+            && ! array_key_exists('tools', $body);
+    });
+});
+
+test('ai assistance keeps the calculated moves when chatgpt uses a drug room', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    AiModel::factory()->create();
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://dene.odoo.com/jsonrpc' => moveOdoo(...),
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'moves' => [
+                    ['product' => 'Couch roll', 'sku' => 'COUCH-1', 'from' => '9L:08:RM:03:01', 'to' => '7L:10:AA:01:01'],
+                ],
+                'notes' => ['Leave the vaccines in the drug room.'],
+            ]),
+        ]),
+    ]);
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-10-01', 'to' => '2026-10-31', 'ai' => 1]))
+        ->assertOk()
+        ->assertJsonPath('suggestions.0.to', 'WH/Stock/4L:01:RA:01:01')
+        ->assertJsonPath('notes.0', 'Leave the vaccines in the drug room.')
+        ->assertJsonPath('ai_warning', 'ChatGPT suggested moves that would not leave a free location, so these are the calculated suggestions.');
 });
 
 function moveOdoo(Request $request): PromiseInterface
@@ -246,6 +370,7 @@ function moveOdoo(Request $request): PromiseInterface
 
     if ($model === 'stock.quant') {
         return Http::response(['result' => [
+            ['product_id' => [50, 'Couch roll'], 'location_id' => [90, 'WH/Stock/PACKING ZONE'], 'quantity' => 100],
             ['product_id' => [50, 'Couch roll'], 'location_id' => [9, 'WH/Stock/9L:08:RM:03:01'], 'quantity' => 12],
             ['product_id' => [51, 'Examination gloves'], 'location_id' => [10, 'WH/Stock/4L:01:RA:01:01'], 'quantity' => 4],
             ['product_id' => [52, 'Cold chain vaccine'], 'location_id' => [11, 'WH/Stock/7L:10:AA:01:01'], 'quantity' => 6],
@@ -254,6 +379,43 @@ function moveOdoo(Request $request): PromiseInterface
     }
 
     return Http::response(['result' => []]);
+}
+
+function pagedMoveOdoo(Request $request): PromiseInterface
+{
+    $params = $request->data()['params'] ?? [];
+
+    if (($params['method'] ?? null) === 'authenticate') {
+        return Http::response(['result' => 7]);
+    }
+
+    if (($params['args'][3] ?? null) === 'sale.order') {
+        $offset = (int) data_get($params, 'args.6.offset', 0);
+
+        if ($offset === 0) {
+            $orders = [];
+
+            for ($i = 1; $i <= 80; $i++) {
+                $orders[] = [
+                    'id' => $i,
+                    'name' => 'S'.$i,
+                    'date_order' => '2026-10-02 09:00:00',
+                    'order_line' => [],
+                ];
+            }
+
+            return Http::response(['result' => $orders]);
+        }
+
+        return Http::response(['result' => [[
+            'id' => 81,
+            'name' => 'S00081',
+            'date_order' => '2026-10-15 09:00:00',
+            'order_line' => [201, 202, 203, 204],
+        ]]]);
+    }
+
+    return moveOdoo($request);
 }
 
 function warehouseOdoo(Request $request): PromiseInterface
