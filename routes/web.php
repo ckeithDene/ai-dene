@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\BiggestFishLogoController;
 use App\Http\Controllers\FirstOrderDiamondLogoController;
+use App\Http\Controllers\WarehouseLabAssetController;
 use App\Http\Middleware\EnsureTeamMembership;
 use Illuminate\Support\Facades\Route;
 
@@ -19,6 +20,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('nhs-purchasing-patterns', 'pages::nhs-purchasing-patterns')->name('nhs-purchasing-patterns');
     Route::livewire('nhs-purchasing-patterns/directives/{directive}', 'pages::nhs-purchasing-directive')->whereNumber('directive')->name('nhs-purchasing-patterns.directives.show');
     Route::livewire('nhs-purchasing-patterns/{opportunity}', 'pages::nhs-purchasing-pattern')->whereNumber('opportunity')->name('nhs-purchasing-patterns.show');
+    Route::livewire('warehouse-lab', 'pages::warehouse-lab')->name('warehouse-lab');
+    Route::get('warehouse-lab/files/{path?}', WarehouseLabAssetController::class)
+        ->where('path', '.*')
+        ->name('warehouse-lab.files');
     Route::get('biggest-fish/{fish}/logo', BiggestFishLogoController::class)->name('biggest-fish.logo');
 });
 

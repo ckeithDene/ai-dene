@@ -35,6 +35,9 @@
                     <flux:sidebar.item icon="chart-bar" :href="route('nhs-purchasing-patterns')" :current="request()->routeIs('nhs-purchasing-patterns*')" wire:navigate>
                         {{ __('NHS Purchasing Patterns') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="archive-box" :href="route('warehouse-lab')" :current="request()->routeIs('warehouse-lab')" wire:navigate>
+                        {{ __('Warehouse Lab') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
 
                 @if (auth()->user()->isAdmin())
