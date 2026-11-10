@@ -2,6 +2,7 @@
 
 use App\Models\OdooConnection;
 use App\Models\User;
+use App\Services\WarehouseMovePlanner;
 use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -20,6 +21,9 @@ test('guests cannot open the warehouse lab', function () {
         ->assertRedirect(route('login'));
 
     $this->get(route('warehouse-lab.orders.show', 44))
+        ->assertRedirect(route('login'));
+
+    $this->get(route('warehouse-lab.moves'))
         ->assertRedirect(route('login'));
 });
 
@@ -43,12 +47,14 @@ test('a signed-in user can load the warehouse lab files', function () {
     expect($page->streamedContent())
         ->toContain('Warehouse Lab')
         ->toContain('id="ordersearch"')
+        ->toContain('id="movefrom"')
         ->toContain('./app.js');
 
     $script = $this->get(route('warehouse-lab.files', ['path' => 'app.js']));
     $script->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
     expect($script->streamedContent())->toContain('three')
-        ->toContain('/warehouse-lab/orders');
+        ->toContain('/warehouse-lab/orders')
+        ->toContain('/warehouse-lab/moves');
 
     $vendor = $this->get(route('warehouse-lab.files', ['path' => 'vendor/three.module.js']));
     $vendor->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
@@ -152,6 +158,103 @@ test('an odoo failure does not expose the connection error', function () {
         ->assertJsonPath('message', 'Could not read Dene Healthcare orders from Odoo.')
         ->assertDontSee('secret database detail');
 });
+
+test('stock move suggestions keep pharma in the drug rooms and free the occupied bin', function () {
+    $result = app(WarehouseMovePlanner::class)->suggest([
+        ['product' => 'Couch roll', 'sku' => 'COUCH-1', 'quantity' => 10, 'location' => 'WH/Stock/9L:08:RM:03:01', 'pharma' => false],
+        ['product' => 'Examination gloves', 'sku' => 'GLV-1', 'quantity' => 1, 'location' => 'WH/Stock/4L:01:RA:01:01', 'pharma' => false],
+        ['product' => 'Cold chain vaccine', 'sku' => 'VAC-1', 'quantity' => 8, 'location' => 'WH/Stock/7L:10:AA:01:01', 'pharma' => true],
+        ['product' => 'Amoxicillin', 'sku' => 'AMOX-1', 'quantity' => 20, 'location' => 'WH/Stock/8L:12:RM:03:01', 'pharma' => true],
+        ['product' => 'Shelf trolley', 'sku' => 'TROL-1', 'quantity' => 1, 'location' => 'WH/Stock/7L:11:AA:01:01', 'pharma' => false],
+    ]);
+
+    expect($result['pharma_left'])->toBe(3)
+        ->and($result['suggestions'])->toHaveCount(1)
+        ->and($result['suggestions'][0]['product'])->toBe('Couch roll')
+        ->and($result['suggestions'][0]['to'])->toBe('WH/Stock/4L:01:RA:01:01')
+        ->and($result['suggestions'][0]['displaced']['product'])->toBe('Examination gloves')
+        ->and($result['suggestions'][0]['displaced']['to'])->toBe('WH/Stock/9L:08:RM:03:01');
+});
+
+test('move suggestions refuse a date range that ends first', function () {
+    $this->actingAs(User::factory()->create());
+    Http::preventStrayRequests();
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-11-10', 'to' => '2026-10-01']))
+        ->assertUnprocessable()
+        ->assertJsonPath('message', 'The end date must be on or after the start date.');
+
+    Http::assertNothingSent();
+});
+
+test('move suggestions come from dene orders and leave pharma stock where it is', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->dene()->create(['url' => 'https://dene.odoo.com']);
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://dene.odoo.com/jsonrpc' => moveOdoo(...),
+    ]);
+
+    $this->get(route('warehouse-lab.moves', ['from' => '2026-10-01', 'to' => '2026-10-31']))
+        ->assertOk()
+        ->assertJsonPath('order_count', 1)
+        ->assertJsonPath('suggestions.0.product', 'Couch roll')
+        ->assertJsonPath('suggestions.0.displaced.product', 'Examination gloves')
+        ->assertJsonPath('suggestions.0.displaced.to', 'WH/Stock/9L:08:RM:03:01')
+        ->assertJsonPath('picks.2.pharma', true);
+
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'midmeds.odoo.com'));
+});
+
+function moveOdoo(Request $request): PromiseInterface
+{
+    $params = $request->data()['params'] ?? [];
+
+    if (($params['method'] ?? null) === 'authenticate') {
+        return Http::response(['result' => 7]);
+    }
+
+    $model = $params['args'][3] ?? null;
+
+    if ($model === 'sale.order') {
+        return Http::response(['result' => [[
+            'id' => 70,
+            'name' => 'S00070',
+            'date_order' => '2026-10-15 09:00:00',
+            'order_line' => [201, 202, 203, 204],
+        ]]]);
+    }
+
+    if ($model === 'sale.order.line') {
+        return Http::response(['result' => [
+            ['id' => 201, 'name' => 'Couch roll', 'product_uom_qty' => 10, 'product_id' => [50, 'Couch roll'], 'order_id' => [70, 'S00070'], 'display_type' => false],
+            ['id' => 202, 'name' => 'Examination gloves', 'product_uom_qty' => 1, 'product_id' => [51, 'Examination gloves'], 'order_id' => [70, 'S00070'], 'display_type' => false],
+            ['id' => 203, 'name' => 'Cold chain vaccine', 'product_uom_qty' => 8, 'product_id' => [52, 'Cold chain vaccine'], 'order_id' => [70, 'S00070'], 'display_type' => false],
+            ['id' => 204, 'name' => 'Amoxicillin', 'product_uom_qty' => 20, 'product_id' => [53, 'Amoxicillin'], 'order_id' => [70, 'S00070'], 'display_type' => false],
+        ]]);
+    }
+
+    if ($model === 'product.product') {
+        return Http::response(['result' => [
+            ['id' => 50, 'name' => 'Couch roll', 'default_code' => 'COUCH-1', 'categ_id' => [1, 'Consumables']],
+            ['id' => 51, 'name' => 'Examination gloves', 'default_code' => 'GLV-1', 'categ_id' => [1, 'Consumables']],
+            ['id' => 52, 'name' => 'Cold chain vaccine', 'default_code' => 'VAC-1', 'categ_id' => [2, 'Pharma']],
+            ['id' => 53, 'name' => 'Amoxicillin', 'default_code' => 'AMOX-1', 'categ_id' => [2, 'Pharma']],
+        ]]);
+    }
+
+    if ($model === 'stock.quant') {
+        return Http::response(['result' => [
+            ['product_id' => [50, 'Couch roll'], 'location_id' => [9, 'WH/Stock/9L:08:RM:03:01'], 'quantity' => 12],
+            ['product_id' => [51, 'Examination gloves'], 'location_id' => [10, 'WH/Stock/4L:01:RA:01:01'], 'quantity' => 4],
+            ['product_id' => [52, 'Cold chain vaccine'], 'location_id' => [11, 'WH/Stock/7L:10:AA:01:01'], 'quantity' => 6],
+            ['product_id' => [53, 'Amoxicillin'], 'location_id' => [12, 'WH/Stock/8L:12:RM:03:01'], 'quantity' => 9],
+        ]]);
+    }
+
+    return Http::response(['result' => []]);
+}
 
 function warehouseOdoo(Request $request): PromiseInterface
 {

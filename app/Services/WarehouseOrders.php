@@ -141,6 +141,117 @@ class WarehouseOrders
         ];
     }
 
+    /**
+     * Read confirmed orders in a date range, with each product's stock location.
+     *
+     * @return array{from: string, to: string, order_count: int, truncated: bool, picks: array<int, array{order: string, product: string, sku: string, quantity: float, location: string, pharma: bool}>}
+     */
+    public function period(string $from, string $to): array
+    {
+        $start = $this->day($from)->startOfDay();
+        $end = $this->day($to)->endOfDay();
+
+        if ($end->lessThan($start)) {
+            throw new RuntimeException('The end date must be on or after the start date.');
+        }
+
+        if ($start->copy()->addYear()->lessThan($end)) {
+            throw new RuntimeException('Choose a date range of one year or less.');
+        }
+
+        $client = $this->client();
+        $orders = $client->searchRead('sale.order', [
+            ['state', 'in', ['sale', 'done']],
+            ['date_order', '>=', $start->format('Y-m-d H:i:s')],
+            ['date_order', '<=', $end->format('Y-m-d H:i:s')],
+        ], ['id', 'name', 'date_order', 'order_line'], 'date_order asc', 150, 0);
+        $lineIds = [];
+        $orderNames = [];
+
+        foreach ($orders as $order) {
+            $id = $this->relationId($order['id'] ?? null);
+
+            if ($id === null) {
+                continue;
+            }
+
+            $orderNames[$id] = $this->text($order['name'] ?? null, 'Order');
+
+            foreach (is_array($order['order_line'] ?? null) ? $order['order_line'] : [] as $lineId) {
+                if (is_int($lineId)) {
+                    $lineIds[] = $lineId;
+                }
+            }
+        }
+
+        $lines = [];
+
+        foreach (array_chunk($lineIds, 80) as $chunk) {
+            array_push($lines, ...$this->lines($client, $chunk));
+        }
+
+        $productIds = [];
+
+        foreach ($lines as $line) {
+            $productId = $this->relationId($line['product_id'] ?? null);
+
+            if ($productId !== null) {
+                $productIds[] = $productId;
+            }
+        }
+
+        $productIds = array_values(array_unique($productIds));
+        $products = [];
+        $locations = [];
+
+        foreach (array_chunk($productIds, 80) as $chunk) {
+            $products += $this->products($client, $chunk);
+            $locations += $this->locations($client, $chunk);
+        }
+
+        $picks = [];
+
+        foreach ($lines as $line) {
+            if (in_array($line['display_type'] ?? null, ['line_section', 'line_note'], true)) {
+                continue;
+            }
+
+            $quantity = is_numeric($line['product_uom_qty'] ?? null) ? (float) $line['product_uom_qty'] : 0.0;
+
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            $productId = $this->relationId($line['product_id'] ?? null);
+            $product = $productId !== null ? ($products[$productId] ?? null) : null;
+            $name = $product['name'] ?? $this->relationName($line['product_id'] ?? null) ?? $this->text($line['name'] ?? null, '');
+            $location = $productId !== null ? ($locations[$productId] ?? null) : null;
+
+            if ($name === '' || $location === null) {
+                continue;
+            }
+
+            $orderId = $this->relationId($line['order_id'] ?? null);
+
+            $picks[] = [
+                'order' => $orderNames[$orderId] ?? 'Order',
+                'product' => $name,
+                'sku' => $product['sku'] ?? '',
+                'quantity' => $quantity,
+                'location' => $location,
+                'pharma' => $this->isPharma($location, $product['category'] ?? '', $name),
+            ];
+        }
+
+        return [
+            'from' => $start->format('d/m/Y'),
+            'to' => $end->format('d/m/Y'),
+            'order_count' => count($orderNames),
+            'truncated' => count($orders) >= 150,
+            'picks' => $picks,
+        ];
+    }
+
     private function client(): OdooClient
     {
         $connection = OdooConnection::for(OdooCompany::Dene);
@@ -158,16 +269,25 @@ class WarehouseOrders
      */
     private function lines(OdooClient $client, array $lineIds): array
     {
-        try {
-            return $client->read('sale.order.line', $lineIds, ['name', 'product_uom_qty', 'product_id', 'display_type']);
-        } catch (RuntimeException) {
-            return $client->read('sale.order.line', $lineIds, ['name', 'product_uom_qty', 'product_id']);
+        foreach ([
+            ['name', 'product_uom_qty', 'product_id', 'display_type', 'order_id'],
+            ['name', 'product_uom_qty', 'product_id', 'order_id'],
+            ['name', 'product_uom_qty', 'product_id', 'display_type'],
+            ['name', 'product_uom_qty', 'product_id'],
+        ] as $fields) {
+            try {
+                return $client->read('sale.order.line', $lineIds, $fields);
+            } catch (RuntimeException) {
+                continue;
+            }
         }
+
+        throw new RuntimeException('Could not read Dene Healthcare orders from Odoo.');
     }
 
     /**
      * @param  array<int, int>  $productIds
-     * @return array<int, array{name: string, sku: string}>
+     * @return array<int, array{name: string, sku: string, category: string}>
      */
     private function products(OdooClient $client, array $productIds): array
     {
@@ -176,9 +296,13 @@ class WarehouseOrders
         }
 
         try {
-            $rows = $client->read('product.product', $productIds, ['name', 'default_code']);
+            $rows = $client->read('product.product', $productIds, ['name', 'default_code', 'categ_id']);
         } catch (RuntimeException) {
-            return [];
+            try {
+                $rows = $client->read('product.product', $productIds, ['name', 'default_code']);
+            } catch (RuntimeException) {
+                return [];
+            }
         }
 
         $products = [];
@@ -193,6 +317,7 @@ class WarehouseOrders
             $products[$id] = [
                 'name' => $this->text($row['name'] ?? null, ''),
                 'sku' => $this->text($row['default_code'] ?? null, ''),
+                'category' => $this->relationName($row['categ_id'] ?? null) ?? '',
             ];
         }
 
@@ -243,6 +368,30 @@ class WarehouseOrders
         }
 
         return $locations;
+    }
+
+    private function day(string $value): Carbon
+    {
+        try {
+            $day = Carbon::createFromFormat('!Y-m-d', $value);
+        } catch (Throwable) {
+            throw new RuntimeException('Choose a start and end date.');
+        }
+
+        if (! $day instanceof Carbon || $day->format('Y-m-d') !== $value) {
+            throw new RuntimeException('Choose a start and end date.');
+        }
+
+        return $day;
+    }
+
+    private function isPharma(string $location, string $category, string $name): bool
+    {
+        $code = strtoupper(trim(str_contains($location, '/') ? substr($location, (int) strrpos($location, '/') + 1) : $location));
+        $text = strtolower($category.' '.$name);
+
+        return str_starts_with($code, '7L:')
+            || preg_match('/\b(pharma|pharmaceutical|drug|medicine|vaccine)\b/', $text) === 1;
     }
 
     private function orderedOn(mixed $value): string

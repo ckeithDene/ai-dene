@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\WarehouseMovePlanner;
 use App\Services\WarehouseOrders;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,24 @@ class WarehouseLabOrderController extends Controller
         return $this->respond(fn (): array => [
             'orders' => $orders->search($query),
         ]);
+    }
+
+    /**
+     * Simulate orders between two dates and suggest stock moves.
+     */
+    public function moves(Request $request, WarehouseOrders $orders, WarehouseMovePlanner $planner): JsonResponse
+    {
+        return $this->respond(function () use ($request, $orders, $planner): array {
+            $period = $orders->period(
+                $request->string('from')->toString(),
+                $request->string('to')->toString(),
+            );
+
+            return [
+                ...$period,
+                ...$planner->suggest($period['picks']),
+            ];
+        });
     }
 
     /**
@@ -41,6 +60,7 @@ class WarehouseLabOrderController extends Controller
             $status = match ($message) {
                 'Connect the Dene Healthcare Odoo connection before loading orders. The MidMeds connection is not used here.' => 422,
                 'That order was not found.' => 404,
+                'Choose a start and end date.', 'The end date must be on or after the start date.', 'Choose a date range of one year or less.' => 422,
                 default => 502,
             };
 
@@ -54,6 +74,9 @@ class WarehouseLabOrderController extends Controller
             'Connect the Dene Healthcare Odoo connection before loading orders. The MidMeds connection is not used here.',
             'Could not read Dene Healthcare orders from Odoo.',
             'That order was not found.',
+            'Choose a start and end date.',
+            'The end date must be on or after the start date.',
+            'Choose a date range of one year or less.',
         ], true) ? $message : 'Could not read Dene Healthcare orders from Odoo.';
     }
 }
