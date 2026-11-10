@@ -18,6 +18,7 @@ test('a signed-in user can open the warehouse lab', function () {
         ->get(route('warehouse-lab'))
         ->assertOk()
         ->assertSee('Warehouse Lab')
+        ->assertSee('fixed inset-0 top-14 lg:top-0 lg:left-64', false)
         ->assertSee(route('warehouse-lab.files', ['path' => 'index.html']), false);
 });
 
