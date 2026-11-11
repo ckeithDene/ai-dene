@@ -50,6 +50,7 @@ test('a signed-in user can load the warehouse lab files', function () {
         ->toContain('id="ordersearch"')
         ->toContain('id="movefrom"')
         ->toContain('id="moveai"')
+        ->toContain('id="heatlegend"')
         ->toContain('./app.js');
 
     $script = $this->get(route('warehouse-lab.files', ['path' => 'app.js']));
@@ -57,7 +58,8 @@ test('a signed-in user can load the warehouse lab files', function () {
     expect($script->streamedContent())->toContain('three')
         ->toContain('/warehouse-lab/orders')
         ->toContain('/warehouse-lab/moves')
-        ->toContain('moveai');
+        ->toContain('moveai')
+        ->toContain('showHeatmap');
 
     $vendor = $this->get(route('warehouse-lab.files', ['path' => 'vendor/three.module.js']));
     $vendor->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
