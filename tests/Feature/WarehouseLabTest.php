@@ -62,7 +62,8 @@ test('a signed-in user can load the warehouse lab files', function () {
         ->toContain('moveai')
         ->toContain('showHeatmap')
         ->toContain('heatRank')
-        ->toContain('showLocationTip');
+        ->toContain('showLocationTip')
+        ->toContain("' picks'");
 
     $vendor = $this->get(route('warehouse-lab.files', ['path' => 'vendor/three.module.js']));
     $vendor->assertOk()->assertHeader('content-type', 'text/javascript; charset=UTF-8');
