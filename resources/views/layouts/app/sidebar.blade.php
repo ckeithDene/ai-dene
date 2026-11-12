@@ -12,6 +12,18 @@
 
             <livewire:team-switcher />
 
+            @php
+                use App\Enums\PageAccess;
+
+                $canViewPage = fn (PageAccess $page): bool => auth()->user()->canViewPage($page);
+                $showMidMeds = $canViewPage(PageAccess::FirstOrderDiamonds)
+                    || $canViewPage(PageAccess::BiggestFish)
+                    || $canViewPage(PageAccess::GoogleShoppingSuggestions);
+                $showDeneHealthcare = $canViewPage(PageAccess::PrimaryCareSpaces)
+                    || $canViewPage(PageAccess::NhsPurchasingPatterns)
+                    || $canViewPage(PageAccess::WarehouseLab);
+            @endphp
+
             <flux:sidebar.nav>
                 <flux:sidebar.group class="grid">
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
@@ -19,29 +31,45 @@
                     </flux:sidebar.item>
                 </flux:sidebar.group>
 
-                <flux:sidebar.group :heading="__('MidMeds')" class="grid">
-                    <flux:sidebar.item icon="building-office-2" :href="route('first-order-diamonds')" :current="request()->routeIs('first-order-diamonds')" wire:navigate>
-                        {{ __('First Order Diamonds') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
-                        {{ __('Biggest Fish') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="shopping-cart" :href="route('google-shopping-suggestions')" :current="request()->routeIs('google-shopping-suggestions')" wire:navigate>
-                        {{ __('Google Shopping Suggestions') }}
-                    </flux:sidebar.item>
-                </flux:sidebar.group>
+                @if ($showMidMeds)
+                    <flux:sidebar.group :heading="__('MidMeds')" class="grid">
+                        @if ($canViewPage(PageAccess::FirstOrderDiamonds))
+                            <flux:sidebar.item icon="building-office-2" :href="route('first-order-diamonds')" :current="request()->routeIs('first-order-diamonds')" wire:navigate>
+                                {{ __('First Order Diamonds') }}
+                            </flux:sidebar.item>
+                        @endif
+                        @if ($canViewPage(PageAccess::BiggestFish))
+                            <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
+                                {{ __('Biggest Fish') }}
+                            </flux:sidebar.item>
+                        @endif
+                        @if ($canViewPage(PageAccess::GoogleShoppingSuggestions))
+                            <flux:sidebar.item icon="shopping-cart" :href="route('google-shopping-suggestions')" :current="request()->routeIs('google-shopping-suggestions')" wire:navigate>
+                                {{ __('Google Shopping Suggestions') }}
+                            </flux:sidebar.item>
+                        @endif
+                    </flux:sidebar.group>
+                @endif
 
-                <flux:sidebar.group :heading="__('Dene Healthcare')" class="grid">
-                    <flux:sidebar.item icon="map-pin" :href="route('primary-care-spaces')" :current="request()->routeIs('primary-care-spaces*')" wire:navigate>
-                        {{ __('Primary Care Spaces') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="chart-bar" :href="route('nhs-purchasing-patterns')" :current="request()->routeIs('nhs-purchasing-patterns*')" wire:navigate>
-                        {{ __('NHS Purchasing Patterns') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="archive-box" :href="route('warehouse-lab')" :current="request()->routeIs('warehouse-lab')" wire:navigate>
-                        {{ __('Warehouse Lab') }}
-                    </flux:sidebar.item>
-                </flux:sidebar.group>
+                @if ($showDeneHealthcare)
+                    <flux:sidebar.group :heading="__('Dene Healthcare')" class="grid">
+                        @if ($canViewPage(PageAccess::PrimaryCareSpaces))
+                            <flux:sidebar.item icon="map-pin" :href="route('primary-care-spaces')" :current="request()->routeIs('primary-care-spaces*')" wire:navigate>
+                                {{ __('Primary Care Spaces') }}
+                            </flux:sidebar.item>
+                        @endif
+                        @if ($canViewPage(PageAccess::NhsPurchasingPatterns))
+                            <flux:sidebar.item icon="chart-bar" :href="route('nhs-purchasing-patterns')" :current="request()->routeIs('nhs-purchasing-patterns*')" wire:navigate>
+                                {{ __('NHS Purchasing Patterns') }}
+                            </flux:sidebar.item>
+                        @endif
+                        @if ($canViewPage(PageAccess::WarehouseLab))
+                            <flux:sidebar.item icon="archive-box" :href="route('warehouse-lab')" :current="request()->routeIs('warehouse-lab')" wire:navigate>
+                                {{ __('Warehouse Lab') }}
+                            </flux:sidebar.item>
+                        @endif
+                    </flux:sidebar.group>
+                @endif
 
                 @if (auth()->user()->isAdmin())
                     <flux:sidebar.group :heading="__('Admin')" class="grid">

@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use App\Concerns\HasTeams;
+use App\Enums\PageAccess;
+use Carbon\CarbonInterface;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Collection;
-use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -26,6 +27,7 @@ use Illuminate\Support\Str;
  * @property string|null $remember_token
  * @property int|null $current_team_id
  * @property bool $is_admin
+ * @property array<int, string>|null $allowed_pages
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Team|null $currentTeam
@@ -49,6 +51,40 @@ class User extends Authenticatable
     }
 
     /**
+     * A missing list means every feature page is still open.
+     * An empty list hides them. Application admins always have access.
+     */
+    public function canViewPage(PageAccess $page): bool
+    {
+        if ($this->isAdmin()) {
+            return true;
+        }
+
+        if ($this->allowed_pages === null) {
+            return true;
+        }
+
+        return in_array($page->value, $this->allowed_pages, true);
+    }
+
+    /**
+     * Checked pages for the team access form.
+     *
+     * @return array<int, string>
+     */
+    public function viewablePageValues(): array
+    {
+        if ($this->allowed_pages === null) {
+            return PageAccess::values();
+        }
+
+        return array_values(array_filter(
+            PageAccess::values(),
+            fn (string $page): bool => in_array($page, $this->allowed_pages, true),
+        ));
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -59,6 +95,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'allowed_pages' => 'array',
         ];
     }
 

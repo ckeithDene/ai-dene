@@ -1,6 +1,7 @@
 <?php
 
 use App\Data\TeamPermissions;
+use App\Enums\PageAccess;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Rules\TeamName;
@@ -22,6 +23,13 @@ new class extends Component
     public array $teamData = [];
 
     public array $members = [];
+
+    /**
+     * Checked page keys, keyed by user id.
+     *
+     * @var array<int, array<int, string>>
+     */
+    public array $memberPages = [];
 
     public array $invitations = [];
 
@@ -80,6 +88,49 @@ new class extends Component
         Flux::toast(variant: 'success', text: __('Member role updated.'));
     }
 
+    public function updatedMemberPages(mixed $value, ?string $key): void
+    {
+        if ($key === null || $key === '') {
+            return;
+        }
+
+        $this->saveMemberPages((int) str($key)->before('.')->toString());
+    }
+
+    private function saveMemberPages(int $userId): void
+    {
+        $editor = Auth::user();
+
+        if (! $editor->isAdmin()) {
+            Gate::authorize('updateMember', $this->teamModel);
+        }
+
+        $validated = Validator::make(
+            ['pages' => $this->memberPages[$userId] ?? []],
+            [
+                'pages' => ['array'],
+                'pages.*' => ['string', Rule::enum(PageAccess::class)],
+            ],
+        )->validate();
+
+        $user = $this->teamModel->memberships()
+            ->with('user')
+            ->where('user_id', $userId)
+            ->firstOrFail()
+            ->user;
+
+        abort_if($user === null, 404);
+        abort_if($user->isAdmin(), 403);
+
+        $selected = collect($validated['pages'])->unique()->sort()->values()->all();
+        $all = collect(PageAccess::values())->sort()->values()->all();
+
+        $user->allowed_pages = $selected === $all ? null : $selected;
+        $user->save();
+
+        Flux::toast(variant: 'success', text: __('Page access updated.'));
+    }
+
     private function populateTeamData(): void
     {
         $user = Auth::user();
@@ -93,7 +144,9 @@ new class extends Component
             'is_personal' => $team->is_personal,
         ];
 
-        $this->members = $team->members()->get()->map(fn ($member) => [
+        $members = $team->members()->get();
+
+        $this->members = $members->map(fn ($member) => [
             'id' => $member->id,
             'name' => $member->name,
             'email' => $member->email,
@@ -101,7 +154,13 @@ new class extends Component
             'initials' => $member->initials(),
             'role' => $member->pivot->role->value,
             'role_label' => $member->pivot->role->label(),
-        ])->toArray();
+            'is_admin' => $member->isAdmin(),
+        ])->all();
+
+        $this->memberPages = $members
+            ->reject(fn ($member) => $member->isAdmin())
+            ->mapWithKeys(fn ($member) => [$member->id => $member->viewablePageValues()])
+            ->all();
 
         $this->invitations = $team->invitations()
             ->whereNull('accepted_at')
@@ -135,6 +194,21 @@ new class extends Component
     {
         return Auth::user()->toTeamPermissions($this->teamModel);
     }
+
+    #[Computed]
+    public function canEditPageAccess(): bool
+    {
+        return Auth::user()->isAdmin() || $this->permissions->canUpdateMember;
+    }
+
+    /**
+     * @return array<int, array{value: string, label: string}>
+     */
+    #[Computed]
+    public function pages(): array
+    {
+        return PageAccess::options();
+    }
 }; ?>
 
 <section class="w-full">
@@ -142,7 +216,7 @@ new class extends Component
 
     <flux:heading level="2" class="sr-only">{{ __('Teams') }}</flux:heading>
 
-    <x-pages::settings.layout :heading="__('Teams')" :subheading="__('Manage your team settings')">
+    <x-pages::settings.layout :heading="__('Teams')" :subheading="__('Manage your team settings')" wide>
         <div class="space-y-10">
             <div class="space-y-6">
                 @if ($this->permissions->canUpdateTeam)
@@ -167,7 +241,7 @@ new class extends Component
                     <div>
                         <flux:heading>{{ __('Team members') }}</flux:heading>
                         @if ($this->permissions->canAddMember || $this->permissions->canUpdateMember || $this->permissions->canRemoveMember)
-                            <flux:subheading>{{ __('Manage who belongs to this team') }}</flux:subheading>
+                            <flux:subheading>{{ __('Manage who belongs to this team and which pages they can open') }}</flux:subheading>
                         @endif
                     </div>
 
@@ -182,16 +256,17 @@ new class extends Component
 
                 <div class="space-y-3">
                     @foreach ($members as $member)
-                        <div class="flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="member-row">
-                            <div class="flex items-center gap-4">
-                                <flux:avatar :name="$member['name']" :initials="$member['initials']" />
-                                <div>
-                                    <div class="font-medium">{{ $member['name'] }}</div>
-                                    <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">{{ $member['email'] }}</flux:text>
+                        <div class="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" data-test="member-row">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-4">
+                                    <flux:avatar :name="$member['name']" :initials="$member['initials']" />
+                                    <div>
+                                        <div class="font-medium">{{ $member['name'] }}</div>
+                                        <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">{{ $member['email'] }}</flux:text>
+                                    </div>
                                 </div>
-                            </div>
 
-                            <div class="flex items-center gap-2">
+                                <div class="flex items-center gap-2">
                                 @if ($member['role'] !== 'owner' && $this->permissions->canUpdateMember)
                                     <flux:dropdown position="bottom" align="end">
                                         <flux:button variant="outline" size="sm" icon:trailing="chevron-down" data-test="member-role-trigger">
@@ -227,6 +302,29 @@ new class extends Component
                                     </flux:modal.trigger>
                                 @endif
                             </div>
+                            </div>
+
+                            @if ($this->canEditPageAccess)
+                                @if ($member['is_admin'])
+                                    <flux:text class="mt-4 text-sm text-zinc-500 dark:text-zinc-400">{{ __('Admins can view every page.') }}</flux:text>
+                                @else
+                                    <div class="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+                                        <flux:checkbox.group
+                                            wire:model.live="memberPages.{{ $member['id'] }}"
+                                            wire:key="member-pages-{{ $member['id'] }}"
+                                            :label="__('Pages they can view')"
+                                        >
+                                            @foreach ($this->pages as $page)
+                                                <flux:checkbox
+                                                    :value="$page['value']"
+                                                    :label="$page['label']"
+                                                    data-test="member-page-{{ $member['id'] }}-{{ $page['value'] }}"
+                                                />
+                                            @endforeach
+                                        </flux:checkbox.group>
+                                    </div>
+                                @endif
+                            @endif
                         </div>
 
                         @if ($member['role'] !== 'owner' && $this->permissions->canRemoveMember)

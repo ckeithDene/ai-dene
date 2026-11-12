@@ -34,6 +34,7 @@ class JoinTeamFromInvitation
             ]);
 
             $user->email_verified_at = now();
+            $user->allowed_pages = [];
             $user->save();
 
             $personalTeam = Team::query()->create([

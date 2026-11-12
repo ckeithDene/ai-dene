@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Middleware\EnsurePageAccess;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -63,6 +64,7 @@ class AppServiceProvider extends ServiceProvider
         // Livewire updates do not pass through the original page route.
         Livewire::addPersistentMiddleware([
             EnsureUserIsAdmin::class,
+            EnsurePageAccess::class,
         ]);
     }
 }
