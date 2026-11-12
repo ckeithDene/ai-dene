@@ -26,6 +26,9 @@
                     <flux:sidebar.item icon="trophy" :href="route('biggest-fish')" :current="request()->routeIs('biggest-fish')" wire:navigate>
                         {{ __('Biggest Fish') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="shopping-cart" :href="route('google-shopping-suggestions')" :current="request()->routeIs('google-shopping-suggestions')" wire:navigate>
+                        {{ __('Google Shopping Suggestions') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
 
                 <flux:sidebar.group :heading="__('Dene Healthcare')" class="grid">

@@ -66,11 +66,20 @@ class OdooClient
      * @param  array<int, string>  $groupBy
      * @return array<int, array<string, mixed>>
      */
-    public function readGroup(string $model, array $domain, array $fields, array $groupBy): array
+    public function readGroup(string $model, array $domain, array $fields, array $groupBy, ?string $order = null, ?int $limit = null, int $offset = 0): array
     {
-        $result = $this->execute($model, 'read_group', [$domain, $fields, $groupBy], [
-            'lazy' => false,
-        ]);
+        $kwargs = ['lazy' => false];
+
+        if ($order !== null) {
+            $kwargs['orderby'] = $order;
+        }
+
+        if ($limit !== null) {
+            $kwargs['limit'] = $limit;
+            $kwargs['offset'] = $offset;
+        }
+
+        $result = $this->execute($model, 'read_group', [$domain, $fields, $groupBy], $kwargs);
 
         if (! is_array($result) || ! array_is_list($result)) {
             throw new RuntimeException('Could not read first orders from Odoo.');

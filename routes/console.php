@@ -20,6 +20,11 @@ Schedule::command('biggest-fish:check')
     ->withoutOverlapping(180)
     ->runInBackground();
 
+Schedule::command('google-shopping-suggestions:check')
+    ->hourly()
+    ->withoutOverlapping(180)
+    ->runInBackground();
+
 Schedule::command('primary-care-spaces:check')
     ->daily()
     ->withoutOverlapping(180)

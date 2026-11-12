@@ -15,6 +15,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('first-order-diamonds', 'pages::first-order-diamonds')->name('first-order-diamonds');
     Route::get('first-order-diamonds/{diamond}/logo', FirstOrderDiamondLogoController::class)->name('first-order-diamonds.logo');
     Route::livewire('biggest-fish', 'pages::biggest-fish')->name('biggest-fish');
+    Route::livewire('google-shopping-suggestions', 'pages::google-shopping-suggestions')->name('google-shopping-suggestions');
     Route::livewire('companies/{partner}', 'pages::company')->whereNumber('partner')->name('companies.show');
     Route::livewire('primary-care-spaces', 'pages::primary-care-spaces')->name('primary-care-spaces');
     Route::livewire('primary-care-spaces/{lead}', 'pages::gp-premises-project')->whereNumber('lead')->name('primary-care-spaces.show');
