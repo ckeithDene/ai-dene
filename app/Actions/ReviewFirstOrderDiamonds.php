@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Data\CompanyBrief;
 use App\Data\DiamondCheckResult;
 use App\Data\FirstOrderLead;
 use App\Enums\FirstOrderDiamondStatus;
@@ -55,6 +56,48 @@ class ReviewFirstOrderDiamonds
     }
 
     /**
+     * Research one customer whose previous review failed.
+     *
+     * A customer that is not a registered company is hidden from the list.
+     * Returns a message when the research cannot be run or fails again.
+     */
+    public function reassess(FirstOrderDiamond $diamond): ?string
+    {
+        set_time_limit(0);
+
+        if ($diamond->status !== FirstOrderDiamondStatus::Failed || ! $diamond->is_registered_company) {
+            return __('This customer has already been reviewed.');
+        }
+
+        $aiModel = AiModel::current();
+
+        if ($aiModel === null || blank($aiModel->api_key)) {
+            return __('Connect ChatGPT before checking first orders.');
+        }
+
+        try {
+            $brief = (new CompanyResearcher)->research(
+                $aiModel,
+                $diamond->company_name,
+                $diamond->address ?? '',
+            );
+        } catch (Throwable) {
+            $diamond->fill([
+                'status' => FirstOrderDiamondStatus::Failed,
+                'failure_reason' => __('ChatGPT could not review this company.'),
+                'checked_at' => now(),
+            ]);
+            $diamond->save();
+
+            return __('ChatGPT could not review this company.');
+        }
+
+        $this->saveBrief($diamond, $brief);
+
+        return null;
+    }
+
+    /**
      * Save one company brief. Finished reviews are not run again.
      */
     private function review(FirstOrderLead $lead, AiModel $aiModel): void
@@ -79,40 +122,7 @@ class ReviewFirstOrderDiamonds
         try {
             $brief = (new CompanyResearcher)->research($aiModel, $lead->companyName, $lead->address);
 
-            if (! $brief->isRegisteredCompany) {
-                $diamond->fill([
-                    'overview' => null,
-                    'company_size' => null,
-                    'estimated_value' => null,
-                    'market_share' => null,
-                    'website' => null,
-                    'logo_path' => null,
-                    'is_registered_company' => false,
-                    'status' => FirstOrderDiamondStatus::Complete,
-                    'failure_reason' => null,
-                    'checked_at' => now(),
-                ]);
-                $diamond->save();
-
-                return;
-            }
-
-            $website = $diamond->website ?? $brief->website;
-            $logoPath = (new CompanyLogoStore)->store($lead->partnerId, $lead->logoContents, $brief->logoUrl, $website);
-
-            $diamond->fill([
-                'overview' => $brief->overview,
-                'company_size' => $brief->companySize,
-                'estimated_value' => $brief->estimatedValue,
-                'market_share' => $brief->marketShare,
-                'website' => $website,
-                'logo_path' => $logoPath ?? $diamond->logo_path,
-                'is_registered_company' => true,
-                'status' => FirstOrderDiamondStatus::Complete,
-                'failure_reason' => null,
-                'checked_at' => now(),
-            ]);
-            $diamond->save();
+            $this->saveBrief($diamond, $brief, $lead->logoContents);
         } catch (Throwable) {
             $diamond->fill([
                 'status' => FirstOrderDiamondStatus::Failed,
@@ -121,6 +131,52 @@ class ReviewFirstOrderDiamonds
             ]);
             $diamond->save();
         }
+    }
+
+    /**
+     * Store the research brief. A customer that is not a registered company is hidden.
+     */
+    private function saveBrief(FirstOrderDiamond $diamond, CompanyBrief $brief, ?string $logoContents = null): void
+    {
+        if (! $brief->isRegisteredCompany) {
+            $diamond->fill([
+                'overview' => null,
+                'company_size' => null,
+                'estimated_value' => null,
+                'market_share' => null,
+                'website' => null,
+                'logo_path' => null,
+                'is_registered_company' => false,
+                'status' => FirstOrderDiamondStatus::Complete,
+                'failure_reason' => null,
+                'checked_at' => now(),
+            ]);
+            $diamond->save();
+
+            return;
+        }
+
+        $website = $diamond->website ?? $brief->website;
+        $logoPath = (new CompanyLogoStore)->store(
+            $diamond->odoo_partner_id,
+            $logoContents,
+            $brief->logoUrl,
+            $website,
+        );
+
+        $diamond->fill([
+            'overview' => $brief->overview,
+            'company_size' => $brief->companySize,
+            'estimated_value' => $brief->estimatedValue,
+            'market_share' => $brief->marketShare,
+            'website' => $website,
+            'logo_path' => $logoPath ?? $diamond->logo_path,
+            'is_registered_company' => true,
+            'status' => FirstOrderDiamondStatus::Complete,
+            'failure_reason' => null,
+            'checked_at' => now(),
+        ]);
+        $diamond->save();
     }
 
     /**

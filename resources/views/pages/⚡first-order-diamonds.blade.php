@@ -40,6 +40,38 @@ new #[Title('First Order Diamonds')] class extends Component {
     }
 
     /**
+     * Research one failed customer again and fill in the missing brief.
+     */
+    public function reassess(int $diamondId): void
+    {
+        Gate::authorize('accessAdmin');
+
+        $diamond = FirstOrderDiamond::query()
+            ->where('is_registered_company', true)
+            ->where('status', FirstOrderDiamondStatus::Failed)
+            ->findOrFail($diamondId);
+
+        $reason = app(ReviewFirstOrderDiamonds::class)->reassess($diamond);
+
+        unset($this->diamonds);
+
+        if ($reason !== null) {
+            Flux::toast(variant: 'danger', text: $reason);
+
+            return;
+        }
+
+        $diamond->refresh();
+
+        Flux::toast(
+            variant: 'success',
+            text: $diamond->is_registered_company
+                ? __('Customer re-assessed.')
+                : __('This is not a registered company, so it has been removed.'),
+        );
+    }
+
+    /**
      * @return LengthAwarePaginator<int, FirstOrderDiamond>
      */
     #[Computed]
@@ -138,6 +170,20 @@ new #[Title('First Order Diamonds')] class extends Component {
 
                     @if ($diamond->status === FirstOrderDiamondStatus::Failed)
                         <flux:callout variant="danger" icon="x-circle" :heading="__('Review failed')" :text="$diamond->failure_reason" />
+
+                        @if (auth()->user()->isAdmin())
+                            <flux:button
+                                size="sm"
+                                icon="arrow-path"
+                                wire:click="reassess({{ $diamond->id }})"
+                                wire:target="reassess({{ $diamond->id }})"
+                                wire:loading.attr="disabled"
+                                data-test="reassess-diamond"
+                            >
+                                <span wire:loading.remove wire:target="reassess({{ $diamond->id }})">{{ __('Re-assess') }}</span>
+                                <span wire:loading wire:target="reassess({{ $diamond->id }})">{{ __('Re-assessing…') }}</span>
+                            </flux:button>
+                        @endif
                     @else
                         @if (filled($diamond->overview))
                             <flux:text>{{ $diamond->overview }}</flux:text>

@@ -680,6 +680,180 @@ test('a private logo url is not downloaded', function () {
     Http::assertNotSent(fn (Request $request) => str_contains($request->url(), '127.0.0.1'));
 });
 
+test('an admin sees a re-assess button on a failed customer', function () {
+    $diamond = FirstOrderDiamond::factory()->create([
+        'company_name' => 'Acme Ltd',
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+        'overview' => null,
+    ]);
+
+    $this->actingAs(User::factory()->admin()->create())
+        ->get(route('first-order-diamonds'))
+        ->assertOk()
+        ->assertSee('Review failed')
+        ->assertSee('data-test="reassess-diamond"', false)
+        ->assertSee('wire:click="reassess('.$diamond->id.')"', false);
+});
+
+test('a team member does not see or run a re-assessment', function () {
+    $diamond = FirstOrderDiamond::factory()->create([
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('first-order-diamonds'))
+        ->assertOk()
+        ->assertSee('Review failed')
+        ->assertDontSee('Re-assess');
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertForbidden();
+
+    Http::assertNothingSent();
+});
+
+test('re-assessing a failed customer fills in the research', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    AiModel::factory()->create();
+    $diamond = FirstOrderDiamond::factory()->create([
+        'company_name' => 'Acme Ltd',
+        'order_name' => 'S00044',
+        'website' => null,
+        'overview' => null,
+        'company_size' => null,
+        'estimated_value' => null,
+        'market_share' => null,
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'is_registered_company' => true,
+                'overview' => 'Acme looks like a strong regional manufacturer.',
+                'company_size' => '200 employees',
+                'estimated_value' => '£40 million',
+                'market_share' => 'Small regional share',
+                'logo_url' => null,
+                'website' => null,
+            ]),
+        ]),
+    ]);
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertSee('Acme looks like a strong regional manufacturer.')
+        ->assertSee('200 employees')
+        ->assertSee('£40 million')
+        ->assertSee('S00044')
+        ->assertDontSee('Review failed');
+
+    $diamond->refresh();
+
+    expect($diamond->status)->toBe(FirstOrderDiamondStatus::Complete)
+        ->and($diamond->failure_reason)->toBeNull()
+        ->and($diamond->is_registered_company)->toBeTrue()
+        ->and($diamond->overview)->toBe('Acme looks like a strong regional manufacturer.');
+});
+
+test('re-assessing a customer that is not a company removes the card', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    AiModel::factory()->create();
+    $diamond = FirstOrderDiamond::factory()->create([
+        'company_name' => 'Jane Smith',
+        'website' => null,
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response([
+            'output_text' => json_encode([
+                'is_registered_company' => false,
+                'overview' => 'Nothing reliable was found.',
+                'company_size' => 'Unknown',
+                'estimated_value' => 'Unknown',
+                'market_share' => 'Unknown',
+                'logo_url' => null,
+                'website' => null,
+            ]),
+        ]),
+    ]);
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertDontSee('Jane Smith')
+        ->assertDontSee('Review failed');
+
+    $diamond->refresh();
+
+    expect($diamond->is_registered_company)->toBeFalse()
+        ->and($diamond->status)->toBe(FirstOrderDiamondStatus::Complete)
+        ->and($diamond->overview)->toBeNull();
+});
+
+test('a failed re-assessment keeps the warning on the card', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    AiModel::factory()->create();
+    $diamond = FirstOrderDiamond::factory()->create([
+        'company_name' => 'Acme Ltd',
+        'website' => null,
+        'overview' => null,
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response(['error' => ['message' => 'insufficient_quota']], 429),
+    ]);
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertSee('Acme Ltd')
+        ->assertSee('Review failed')
+        ->assertSee('ChatGPT could not review this company.');
+
+    expect($diamond->fresh()->status)->toBe(FirstOrderDiamondStatus::Failed);
+});
+
+test('re-assessment waits until chatgpt is connected', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $diamond = FirstOrderDiamond::factory()->create([
+        'website' => null,
+        'status' => FirstOrderDiamondStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertHasNoErrors();
+
+    Http::assertNothingSent();
+
+    $diamond->refresh();
+
+    expect($diamond->status)->toBe(FirstOrderDiamondStatus::Failed)
+        ->and($diamond->failure_reason)->toBe('ChatGPT could not review this company.');
+});
+
+test('a reviewed customer cannot be re-assessed', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    AiModel::factory()->create();
+    $diamond = FirstOrderDiamond::factory()->create([
+        'status' => FirstOrderDiamondStatus::Complete,
+    ]);
+
+    Livewire::test('pages::first-order-diamonds')
+        ->call('reassess', $diamond->id)
+        ->assertNotFound();
+
+    Http::assertNothingSent();
+});
+
 test('the check tells the user when odoo is not connected', function () {
     $this->artisan('first-order-diamonds:check')
         ->expectsOutputToContain('Connect Odoo before checking first orders.')
