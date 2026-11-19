@@ -3,14 +3,40 @@
 namespace App\Services;
 
 use App\Data\CompanyBrief;
+use App\Exceptions\OutOfTokens;
 use App\Models\AiModel;
 use App\Models\FirstOrderDiamond;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 class CompanyResearcher
 {
+    /**
+     * Check whether the saved ChatGPT account can spend tokens.
+     *
+     * A model lookup can succeed after the account has run out of quota, so this
+     * asks the responses API. A rate limit is not an empty balance.
+     */
+    public function hasTokens(AiModel $aiModel): bool
+    {
+        try {
+            $response = $this->client($aiModel)
+                ->timeout(20)
+                ->post('https://api.openai.com/v1/responses', [
+                    'model' => $aiModel->model,
+                    'input' => 'Reply with ok.',
+                    'max_output_tokens' => 16,
+                ]);
+        } catch (ConnectionException) {
+            return true;
+        }
+
+        return ! $this->isOutOfTokens($response);
+    }
+
     /**
      * Research a company with the saved ChatGPT model and web search.
      */
@@ -18,21 +44,8 @@ class CompanyResearcher
     {
         set_time_limit(330);
 
-        $request = Http::connectTimeout(5)
-            ->timeout(300)
-            ->withoutRedirecting()
-            ->acceptJson()
-            ->asJson()
-            ->withToken($aiModel->api_key);
-
-        if (filled($aiModel->organization)) {
-            $request = $request->withHeaders([
-                'OpenAI-Organization' => $aiModel->organization,
-            ]);
-        }
-
         try {
-            $response = $request->post('https://api.openai.com/v1/responses', [
+            $response = $this->client($aiModel)->post('https://api.openai.com/v1/responses', [
                 'model' => $aiModel->model,
                 'tools' => [
                     ['type' => 'web_search'],
@@ -41,6 +54,10 @@ class CompanyResearcher
             ]);
         } catch (ConnectionException) {
             throw new RuntimeException('Could not reach ChatGPT.');
+        }
+
+        if ($this->isOutOfTokens($response)) {
+            throw new OutOfTokens('ChatGPT has no tokens left.');
         }
 
         if (! $response->successful()) {
@@ -63,6 +80,52 @@ class CompanyResearcher
             logoUrl: $this->logoUrl($decoded['logo_url'] ?? null),
             website: FirstOrderDiamond::httpUrl($decoded['website'] ?? null),
         );
+    }
+
+    private function client(AiModel $aiModel): PendingRequest
+    {
+        $request = Http::connectTimeout(5)
+            ->timeout(300)
+            ->withoutRedirecting()
+            ->acceptJson()
+            ->asJson()
+            ->withToken($aiModel->api_key);
+
+        if (filled($aiModel->organization)) {
+            $request = $request->withHeaders([
+                'OpenAI-Organization' => $aiModel->organization,
+            ]);
+        }
+
+        return $request;
+    }
+
+    /**
+     * Decide whether an OpenAI response means the account cannot spend tokens.
+     */
+    private function isOutOfTokens(Response $response): bool
+    {
+        if (! in_array($response->status(), [402, 429], true)) {
+            return false;
+        }
+
+        $error = $response->json('error');
+        $code = is_array($error) ? ($error['code'] ?? null) : null;
+        $type = is_array($error) ? ($error['type'] ?? null) : null;
+        $message = is_array($error) ? ($error['message'] ?? null) : null;
+        $marker = strtolower(implode(' ', array_filter([
+            is_string($code) ? $code : null,
+            is_string($type) ? $type : null,
+            is_string($message) ? $message : null,
+        ])));
+
+        if ($marker === '' || str_contains($marker, 'rate_limit') || str_contains($marker, 'rate limit')) {
+            return false;
+        }
+
+        return str_contains($marker, 'quota')
+            || str_contains($marker, 'billing')
+            || str_contains($marker, 'insufficient');
     }
 
     private function prompt(string $company, string $address): string

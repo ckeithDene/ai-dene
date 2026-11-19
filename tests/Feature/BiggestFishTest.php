@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CustomerReviewStatus;
 use App\Models\AiModel;
 use App\Models\BiggestFish;
 use App\Models\BiggestFishScan;
@@ -87,7 +88,8 @@ test('biggest fish are listed by estimated value with the total spent', function
         ->and(BiggestFishScan::current()->last_order_id)->toBe(12);
 
     $reviews = collect(Http::recorded())
-        ->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses')
+        ->filter(fn (array $pair): bool => $pair[0]->url() === 'https://api.openai.com/v1/responses'
+            && str_contains((string) ($pair[0]->data()['input'] ?? ''), 'Company name:'))
         ->count();
 
     expect($reviews)->toBe(3);
@@ -142,6 +144,147 @@ test('non-admins cannot start a biggest fish check', function () {
         ->assertForbidden();
 
     Http::assertNothingSent();
+});
+
+test('the scan does not run when chatgpt has no tokens', function () {
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+    AiModel::factory()->create();
+
+    $scan = new BiggestFishScan;
+    $scan->last_order_id = 80;
+    $scan->save();
+
+    Http::fake([
+        'https://api.openai.com/v1/responses' => Http::response([
+            'error' => [
+                'message' => 'You exceeded your current quota, please check your plan and billing details.',
+                'type' => 'insufficient_quota',
+                'code' => 'insufficient_quota',
+            ],
+        ], 429),
+    ]);
+
+    $this->artisan('biggest-fish:check')
+        ->expectsOutputToContain('ChatGPT has no tokens left, so no customers were checked.')
+        ->assertFailed();
+
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'odoo.com'));
+
+    expect(BiggestFish::query()->count())->toBe(0)
+        ->and(BiggestFishScan::query()->value('last_order_id'))->toBe(80);
+});
+
+test('customers are checked again when chatgpt runs out of tokens mid scan', function () {
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+    AiModel::factory()->create();
+
+    $scan = new BiggestFishScan;
+    $scan->last_order_id = 4;
+    $scan->save();
+
+    $researchCalls = 0;
+
+    Http::fake(function (Request $request) use (&$researchCalls) {
+        if ($request->url() === 'https://api.openai.com/v1/responses') {
+            $input = (string) ($request->data()['input'] ?? '');
+
+            if (! str_contains($input, 'Company name:')) {
+                return Http::response(['output_text' => 'ok']);
+            }
+
+            $researchCalls++;
+
+            if ($researchCalls === 2) {
+                return Http::response([
+                    'error' => [
+                        'message' => 'You exceeded your current quota, please check your plan and billing details.',
+                        'type' => 'insufficient_quota',
+                        'code' => 'insufficient_quota',
+                    ],
+                ], 429);
+            }
+
+            $value = str_contains($input, 'Small Ltd') ? 5_000_000 : 40_000_000;
+
+            return Http::response([
+                'output_text' => json_encode([
+                    'is_registered_company' => true,
+                    'overview' => 'A substantial business.',
+                    'company_size' => '1,000 employees',
+                    'estimated_value' => $value === 5_000_000 ? '£5 million' : '£40 million',
+                    'estimated_value_gbp' => $value,
+                    'market_share' => 'National',
+                    'logo_url' => null,
+                    'website' => null,
+                ]),
+            ]);
+        }
+
+        return biggestFishOdooResponse($request);
+    });
+
+    $this->artisan('biggest-fish:check')
+        ->expectsOutputToContain('Customers that were not reviewed will be checked again.')
+        ->assertFailed();
+
+    expect(BiggestFish::query()->where('company_name', 'Acme Ltd')->first()?->status)->toBe(CustomerReviewStatus::Complete)
+        ->and(BiggestFish::query()->where('company_name', 'Small Ltd')->exists())->toBeFalse()
+        ->and(BiggestFishScan::query()->value('last_order_id'))->toBe(4);
+
+    $this->artisan('biggest-fish:check')->assertSuccessful();
+
+    expect(BiggestFish::query()->where('company_name', 'Small Ltd')->first()?->status)->toBe(CustomerReviewStatus::Complete)
+        ->and(BiggestFishScan::query()->value('last_order_id'))->toBe(11);
+});
+
+test('a customer missed when the review failed is checked again', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+    AiModel::factory()->create();
+
+    BiggestFish::factory()->create([
+        'odoo_partner_id' => 99,
+        'company_name' => 'Missed Ltd',
+        'is_registered_company' => false,
+        'website' => null,
+        'estimated_value' => null,
+        'estimated_value_gbp' => null,
+        'overview' => null,
+        'status' => CustomerReviewStatus::Failed,
+        'failure_reason' => 'ChatGPT could not review this company.',
+    ]);
+
+    Http::fake(function (Request $request) {
+        if ($request->url() === 'https://api.openai.com/v1/responses') {
+            $input = (string) ($request->data()['input'] ?? '');
+
+            if (! str_contains($input, 'Company name:')) {
+                return Http::response(['output_text' => 'ok']);
+            }
+
+            return Http::response([
+                'output_text' => json_encode([
+                    'is_registered_company' => true,
+                    'overview' => 'A substantial business.',
+                    'company_size' => '1,000 employees',
+                    'estimated_value' => '£40 million',
+                    'estimated_value_gbp' => 40_000_000,
+                    'market_share' => 'National',
+                    'logo_url' => null,
+                    'website' => null,
+                ]),
+            ]);
+        }
+
+        return biggestFishOdooResponse($request);
+    });
+
+    $this->artisan('biggest-fish:check')->assertSuccessful();
+
+    $this->get(route('biggest-fish'))
+        ->assertOk()
+        ->assertSee('Missed Ltd')
+        ->assertSee('£40 million');
 });
 
 test('the check tells the user when odoo is not connected', function () {

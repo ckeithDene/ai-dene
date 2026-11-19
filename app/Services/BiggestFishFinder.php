@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Data\BiggestFishBatch;
 use App\Data\BiggestFishLead;
 use App\Enums\CustomerReviewStatus;
 use App\Models\BiggestFish;
@@ -9,7 +10,7 @@ use App\Models\BiggestFishScan;
 
 class BiggestFishFinder
 {
-    private const int MAX_CUSTOMERS = 20;
+    public const int MAX_CUSTOMERS = 20;
 
     private const int PAGE_SIZE = 100;
 
@@ -18,10 +19,17 @@ class BiggestFishFinder
     /**
      * Find the next unchecked customers who have a confirmed order.
      *
-     * @return array<int, BiggestFishLead>
+     * The cursor is not saved here. The caller saves it after the reviews finish,
+     * so a token failure can walk the same orders again.
      */
-    public function nextCustomers(OdooClient $client): array
+    public function nextCustomers(OdooClient $client, int $limit): BiggestFishBatch
     {
+        $cursor = (int) BiggestFishScan::query()->value('last_order_id');
+
+        if ($limit < 1) {
+            return new BiggestFishBatch([], $cursor);
+        }
+
         $checked = array_fill_keys(
             BiggestFish::query()
                 ->whereIn('status', [CustomerReviewStatus::Complete, CustomerReviewStatus::Failed])
@@ -30,8 +38,6 @@ class BiggestFishFinder
             true,
         );
 
-        $scan = BiggestFishScan::current();
-        $cursor = $scan->last_order_id;
         $leads = [];
         $seen = [];
         $pages = 0;
@@ -79,19 +85,25 @@ class BiggestFishFinder
                 $spent = $this->totalSpent($client, $companyId);
                 $leads[] = $this->lead($companyId, $company, $spent['amount'], $spent['currency']);
 
-                if (count($leads) >= self::MAX_CUSTOMERS) {
-                    $this->remember($scan, $cursor);
-
-                    return $leads;
+                if (count($leads) >= $limit) {
+                    return new BiggestFishBatch($leads, $cursor);
                 }
             }
 
             $pages++;
         } while (count($orders) === self::PAGE_SIZE && $pages < self::MAX_PAGES);
 
-        $this->remember($scan, $cursor);
+        return new BiggestFishBatch($leads, $cursor);
+    }
 
-        return $leads;
+    /**
+     * Remember how far the finished scan walked.
+     */
+    public function commitCursor(int $cursor): void
+    {
+        $scan = BiggestFishScan::current();
+        $scan->last_order_id = max($scan->last_order_id, $cursor);
+        $scan->touch();
     }
 
     /**
@@ -274,11 +286,5 @@ class BiggestFishFinder
         }
 
         return null;
-    }
-
-    private function remember(BiggestFishScan $scan, int $cursor): void
-    {
-        $scan->last_order_id = $cursor;
-        $scan->save();
     }
 }
