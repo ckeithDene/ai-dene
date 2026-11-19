@@ -25,7 +25,21 @@ test('the page explains when no large customers have been found', function () {
         ->get(route('biggest-fish'))
         ->assertOk()
         ->assertSee('No customers over £20 million have been found yet.')
+        ->assertSee('No scan has run yet.')
         ->assertDontSee('Check now');
+});
+
+test('the page shows when the latest scan ran', function () {
+    $this->actingAs(User::factory()->create());
+
+    $scan = new BiggestFishScan;
+    $scan->last_order_id = 4521;
+    $scan->save();
+
+    $this->get(route('biggest-fish'))
+        ->assertOk()
+        ->assertSee('Last scan '.$scan->updated_at->timezone(config('app.timezone'))->format('j M Y, H:i'))
+        ->assertSee('Reached order 4521');
 });
 
 test('biggest fish are listed by estimated value with the total spent', function () {

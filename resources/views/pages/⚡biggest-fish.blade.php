@@ -3,6 +3,7 @@
 use App\Actions\ReviewBiggestFish;
 use App\Enums\CustomerReviewStatus;
 use App\Models\BiggestFish;
+use App\Models\BiggestFishScan;
 use Flux\Flux;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Gate;
@@ -24,7 +25,7 @@ new #[Title('Biggest Fish')] class extends Component {
         $result = app(ReviewBiggestFish::class)->handle();
 
         $this->resetPage();
-        unset($this->fish);
+        unset($this->fish, $this->scan);
 
         if ($result->skippedReason !== null) {
             Flux::toast(variant: 'danger', text: $result->skippedReason);
@@ -52,6 +53,12 @@ new #[Title('Biggest Fish')] class extends Component {
             ->orderByDesc('id')
             ->paginate(15);
     }
+
+    #[Computed]
+    public function scan(): ?BiggestFishScan
+    {
+        return BiggestFishScan::query()->first();
+    }
 }; ?>
 
 <div class="flex h-full w-full flex-1 flex-col gap-6">
@@ -59,6 +66,16 @@ new #[Title('Biggest Fish')] class extends Component {
         <div>
             <flux:heading size="xl">{{ __('Biggest Fish') }}</flux:heading>
             <flux:subheading>{{ __('Customers with a confirmed order and an estimated value over £20 million. Twenty customers are checked every hour.') }}</flux:subheading>
+            <flux:text class="mt-2" data-test="biggest-fish-scan">
+                @if ($this->scan?->updated_at === null)
+                    {{ __('No scan has run yet.') }}
+                @else
+                    {{ __('Last scan :time. Reached order :order.', [
+                        'time' => $this->scan->updated_at->timezone(config('app.timezone'))->format('j M Y, H:i'),
+                        'order' => $this->scan->last_order_id,
+                    ]) }}
+                @endif
+            </flux:text>
         </div>
 
         @if (auth()->user()->isAdmin())
