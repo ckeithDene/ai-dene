@@ -91,14 +91,25 @@ new #[Title('Google Shopping Suggestions')] class extends Component {
         <div>
             <flux:heading size="xl">{{ __('Google Shopping Suggestions') }}</flux:heading>
             <flux:subheading>{{ __('Products where we could be the cheapest seller on Google Shopping. Twenty products are checked every hour, working down from our best sellers by units sold. Our prices have 20% VAT added before comparing.') }}</flux:subheading>
+            <flux:text class="mt-2">{{ __('Download a Merchant Center file of the current catalogue. Prices include 20% VAT.') }}</flux:text>
         </div>
 
-        @if (auth()->user()->isAdmin())
-            <flux:button wire:click="checkNow" icon="arrow-path" data-test="check-google-shopping-button">
-                {{ __('Check now') }}
+        <div class="flex flex-wrap gap-2">
+            <flux:button :href="route('google-shopping-feed')" icon="arrow-down-tray" data-test="download-google-shopping-feed">
+                {{ __('Download feed') }}
             </flux:button>
-        @endif
+
+            @if (auth()->user()->isAdmin())
+                <flux:button wire:click="checkNow" icon="arrow-path" data-test="check-google-shopping-button">
+                    {{ __('Check now') }}
+                </flux:button>
+            @endif
+        </div>
     </div>
+
+    @if (session('google-shopping-feed-error'))
+        <flux:callout variant="danger" icon="x-circle" :heading="__('Feed not downloaded')" :text="session('google-shopping-feed-error')" />
+    @endif
 
     <flux:radio.group wire:model.live="view" variant="segmented" class="max-w-2xl">
         <flux:radio value="sales" :label="__('Sales price is cheapest').' ('.$this->counts['sales'].')'" />

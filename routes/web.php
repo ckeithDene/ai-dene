@@ -3,6 +3,7 @@
 use App\Enums\PageAccess;
 use App\Http\Controllers\BiggestFishLogoController;
 use App\Http\Controllers\FirstOrderDiamondLogoController;
+use App\Http\Controllers\GoogleShoppingFeedController;
 use App\Http\Controllers\WarehouseLabAssetController;
 use App\Http\Controllers\WarehouseLabOrderController;
 use App\Http\Middleware\EnsureTeamMembership;
@@ -28,9 +29,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware('page:'.PageAccess::FirstOrderDiamonds->value.','.PageAccess::BiggestFish->value)
         ->name('companies.show');
 
-    Route::livewire('google-shopping-suggestions', 'pages::google-shopping-suggestions')
-        ->middleware('page:'.PageAccess::GoogleShoppingSuggestions->value)
-        ->name('google-shopping-suggestions');
+    Route::middleware('page:'.PageAccess::GoogleShoppingSuggestions->value)->group(function () {
+        Route::livewire('google-shopping-suggestions', 'pages::google-shopping-suggestions')->name('google-shopping-suggestions');
+        Route::get('google-shopping-feed', GoogleShoppingFeedController::class)->name('google-shopping-feed');
+    });
 
     Route::middleware('page:'.PageAccess::PrimaryCareSpaces->value)->group(function () {
         Route::livewire('primary-care-spaces', 'pages::primary-care-spaces')->name('primary-care-spaces');

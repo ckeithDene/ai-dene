@@ -21,6 +21,148 @@ test('guests are redirected to the login page', function () {
         ->assertRedirect(route('login'));
 });
 
+test('guests cannot download the google shopping feed', function () {
+    $this->get(route('google-shopping-feed'))
+        ->assertRedirect(route('login'));
+});
+
+test('the page offers a google shopping feed download', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('google-shopping-suggestions'))
+        ->assertOk()
+        ->assertSee('Download feed')
+        ->assertSee('Download a Merchant Center file of the current catalogue.')
+        ->assertSee(route('google-shopping-feed'), false);
+});
+
+test('the feed lists the current catalogue for google merchant center', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+
+    Http::fake(fn (Request $request): PromiseInterface => googleShoppingFeedResponse($request));
+
+    $response = $this->get(route('google-shopping-feed'));
+
+    $response->assertOk()->assertDownload('midmeds-google-shopping.txt');
+
+    $rows = collect(preg_split("/\r\n|\n|\r/", rtrim($response->streamedContent(), "\r\n")))
+        ->map(fn (string $line): array => explode("\t", $line));
+
+    expect($rows)->toHaveCount(3)
+        ->and($rows[0])->toBe([
+            'id',
+            'title',
+            'description',
+            'link',
+            'image_link',
+            'availability',
+            'price',
+            'condition',
+            'brand',
+            'gtin',
+            'mpn',
+            'identifier_exists',
+            'product_type',
+        ])
+        ->and($rows[1])->toBe([
+            'GLV-1',
+            'Nitrile Gloves',
+            'Soft gloves. Pack of 100',
+            'https://www.midmeds.co.uk/shop/gloves-10',
+            'https://www.midmeds.co.uk/web/image/product.template/69031/image_1920',
+            'in_stock',
+            '12.00 GBP',
+            'new',
+            'Aurelia',
+            '4006381333931',
+            'GLV-1',
+            '',
+            'All > Medical Consumables > Gloves',
+        ])
+        ->and($rows[2])->toBe([
+            '2',
+            'Plain Apron',
+            'Plain Apron',
+            'https://www.midmeds.co.uk/shop/apron-2',
+            'https://www.midmeds.co.uk/web/image/product.template/80/image_1920',
+            'out_of_stock',
+            '6.00 GBP',
+            'new',
+            '',
+            '',
+            '',
+            'no',
+            '',
+        ]);
+});
+
+test('the feed still downloads when odoo has no brand field', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+
+    Http::fake(function (Request $request): PromiseInterface {
+        $params = $request->data()['params'] ?? [];
+
+        if (($params['method'] ?? null) === 'authenticate') {
+            return Http::response(['result' => 7]);
+        }
+
+        $fields = ((array) ($params['args'][6] ?? []))['fields'] ?? [];
+
+        if (in_array('product_brand_id', $fields, true) || in_array('qty_available', $fields, true)) {
+            return Http::response(['error' => ['message' => 'Invalid field']]);
+        }
+
+        return Http::response(['result' => [[
+            'id' => 9,
+            'name' => 'Apron',
+            'default_code' => 'APR-1',
+            'barcode' => false,
+            'lst_price' => 4.49,
+            'website_url' => '/shop/apron-9',
+            'categ_id' => false,
+            'product_tmpl_id' => [90, 'Apron'],
+            'type' => 'consu',
+        ]]]);
+    });
+
+    $response = $this->get(route('google-shopping-feed'));
+    $line = explode("\t", explode("\n", trim($response->streamedContent()))[1]);
+
+    expect($line[0])->toBe('APR-1')
+        ->and($line[6])->toBe('5.39 GBP')
+        ->and($line[8])->toBe('')
+        ->and($line[11])->toBe('no');
+});
+
+test('the feed tells the user when odoo is not connected', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('google-shopping-feed'))
+        ->assertRedirect(route('google-shopping-suggestions'));
+
+    $this->get(route('google-shopping-suggestions'))
+        ->assertOk()
+        ->assertSee('Connect Odoo before downloading the Google Shopping feed.');
+
+    Http::assertNothingSent();
+});
+
+test('the feed tells the user when products cannot be read', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://acme.odoo.com']);
+
+    Http::fake([
+        'https://acme.odoo.com/*' => Http::response(['error' => ['message' => 'down']], 500),
+    ]);
+
+    $this->get(route('google-shopping-feed'))
+        ->assertRedirect(route('google-shopping-suggestions'));
+
+    $this->get(route('google-shopping-suggestions'))
+        ->assertOk()
+        ->assertSee('Could not read products from Odoo.');
+});
+
 test('the page explains when no products have been found', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('google-shopping-suggestions'))
@@ -243,4 +385,92 @@ function googleShoppingOdooResponse(Request $request): PromiseInterface
     }
 
     return Http::response(['result' => []]);
+}
+
+function googleShoppingFeedResponse(Request $request): PromiseInterface
+{
+    $params = $request->data()['params'] ?? [];
+
+    if (($params['method'] ?? null) === 'authenticate') {
+        return Http::response(['result' => 7]);
+    }
+
+    $offset = ((array) (($params['args'][6] ?? null)))['offset'] ?? 0;
+
+    if ($offset > 0) {
+        return Http::response(['result' => []]);
+    }
+
+    return Http::response(['result' => [
+        [
+            'id' => 1,
+            'name' => '[GLV-1] Nitrile Gloves',
+            'default_code' => 'GLV-1',
+            'barcode' => '4006381333931',
+            'lst_price' => 10,
+            'qty_available' => 5,
+            'description_sale' => "Soft gloves.\nPack\tof 100",
+            'website_url' => '/shop/gloves-10',
+            'categ_id' => [4, 'All / Medical Consumables / Gloves'],
+            'product_tmpl_id' => [69031, 'Nitrile Gloves'],
+            'product_brand_id' => [3, 'Aurelia'],
+            'type' => 'consu',
+        ],
+        [
+            'id' => 2,
+            'name' => 'Plain Apron',
+            'default_code' => false,
+            'barcode' => '123',
+            'lst_price' => 5,
+            'qty_available' => 0,
+            'description_sale' => false,
+            'website_url' => 'https://odoo.example/shop/apron-2',
+            'categ_id' => false,
+            'product_tmpl_id' => [80, 'Plain Apron'],
+            'product_brand_id' => false,
+            'type' => 'consu',
+        ],
+        [
+            'id' => 3,
+            'name' => 'Delivery',
+            'default_code' => 'DEL',
+            'barcode' => false,
+            'lst_price' => 15,
+            'qty_available' => 1,
+            'description_sale' => 'A service',
+            'website_url' => '/shop/delivery-3',
+            'categ_id' => false,
+            'product_tmpl_id' => [3, 'Delivery'],
+            'product_brand_id' => false,
+            'type' => 'service',
+        ],
+        [
+            'id' => 4,
+            'name' => 'Free Sample',
+            'default_code' => 'FREE',
+            'barcode' => false,
+            'lst_price' => 0,
+            'qty_available' => 10,
+            'description_sale' => false,
+            'website_url' => '/shop/sample-4',
+            'categ_id' => false,
+            'product_tmpl_id' => [4, 'Free Sample'],
+            'product_brand_id' => false,
+            'type' => 'consu',
+        ],
+        [
+            'id' => 5,
+            'name' => 'Unlisted Mask',
+            'default_code' => 'MSK',
+            'barcode' => false,
+            'lst_price' => 8,
+            'qty_available' => 2,
+            'description_sale' => false,
+            'website_url' => false,
+            'categ_id' => false,
+            'product_tmpl_id' => [5, 'Unlisted Mask'],
+            'product_brand_id' => false,
+            'type' => 'consu',
+        ],
+    ]]);
 }
