@@ -18,7 +18,8 @@
                 $canViewPage = fn (PageAccess $page): bool => auth()->user()->canViewPage($page);
                 $showMidMeds = $canViewPage(PageAccess::FirstOrderDiamonds)
                     || $canViewPage(PageAccess::BiggestFish)
-                    || $canViewPage(PageAccess::GoogleShoppingSuggestions);
+                    || $canViewPage(PageAccess::GoogleShoppingSuggestions)
+                    || $canViewPage(PageAccess::MidMedsAssetGeneration);
                 $showDeneHealthcare = $canViewPage(PageAccess::PrimaryCareSpaces)
                     || $canViewPage(PageAccess::NhsPurchasingPatterns)
                     || $canViewPage(PageAccess::WarehouseLab);
@@ -46,6 +47,11 @@
                         @if ($canViewPage(PageAccess::GoogleShoppingSuggestions))
                             <flux:sidebar.item icon="shopping-cart" :href="route('google-shopping-suggestions')" :current="request()->routeIs('google-shopping-suggestions')" wire:navigate>
                                 {{ __('Google Shopping Suggestions') }}
+                            </flux:sidebar.item>
+                        @endif
+                        @if ($canViewPage(PageAccess::MidMedsAssetGeneration))
+                            <flux:sidebar.item icon="photo" :href="route('midmeds-asset-generation')" :current="request()->routeIs('midmeds-asset-generation')" wire:navigate>
+                                {{ __('MidMeds Asset Generation') }}
                             </flux:sidebar.item>
                         @endif
                     </flux:sidebar.group>

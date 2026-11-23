@@ -20,6 +20,7 @@ test('a member without a page cannot open it', function (string $name, array $pa
     'biggest fish' => ['biggest-fish', []],
     'google shopping suggestions' => ['google-shopping-suggestions', []],
     'google shopping feed' => ['google-shopping-feed', []],
+    'midmeds asset generation' => ['midmeds-asset-generation', []],
     'primary care spaces' => ['primary-care-spaces', []],
     'a primary care project' => ['primary-care-spaces.show', ['lead' => 1]],
     'nhs purchasing patterns' => ['nhs-purchasing-patterns', []],

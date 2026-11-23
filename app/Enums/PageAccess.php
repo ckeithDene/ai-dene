@@ -7,6 +7,7 @@ enum PageAccess: string
     case FirstOrderDiamonds = 'first-order-diamonds';
     case BiggestFish = 'biggest-fish';
     case GoogleShoppingSuggestions = 'google-shopping-suggestions';
+    case MidMedsAssetGeneration = 'midmeds-asset-generation';
     case PrimaryCareSpaces = 'primary-care-spaces';
     case NhsPurchasingPatterns = 'nhs-purchasing-patterns';
     case WarehouseLab = 'warehouse-lab';
@@ -17,6 +18,7 @@ enum PageAccess: string
             self::FirstOrderDiamonds => __('First Order Diamonds'),
             self::BiggestFish => __('Biggest Fish'),
             self::GoogleShoppingSuggestions => __('Google Shopping Suggestions'),
+            self::MidMedsAssetGeneration => __('MidMeds Asset Generation'),
             self::PrimaryCareSpaces => __('Primary Care Spaces'),
             self::NhsPurchasingPatterns => __('NHS Purchasing Patterns'),
             self::WarehouseLab => __('Warehouse Lab'),

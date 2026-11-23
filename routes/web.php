@@ -34,6 +34,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('google-shopping-feed', GoogleShoppingFeedController::class)->name('google-shopping-feed');
     });
 
+    Route::livewire('midmeds-asset-generation', 'pages::midmeds-asset-generation')
+        ->middleware('page:'.PageAccess::MidMedsAssetGeneration->value)
+        ->name('midmeds-asset-generation');
+
     Route::middleware('page:'.PageAccess::PrimaryCareSpaces->value)->group(function () {
         Route::livewire('primary-care-spaces', 'pages::primary-care-spaces')->name('primary-care-spaces');
         Route::livewire('primary-care-spaces/{lead}', 'pages::gp-premises-project')->whereNumber('lead')->name('primary-care-spaces.show');
