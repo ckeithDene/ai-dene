@@ -2,6 +2,7 @@
 
 use App\Enums\PageAccess;
 use App\Models\AiModel;
+use App\Models\ComboImage;
 use App\Models\OdooConnection;
 use App\Models\User;
 use GuzzleHttp\Promise\PromiseInterface;
@@ -21,6 +22,8 @@ test('guests cannot open a combo image', function (string $name) {
 })->with([
     'view' => ['midmeds-asset-generation.image'],
     'download' => ['midmeds-asset-generation.image.download'],
+    'gallery' => ['midmeds-asset-generation.gallery'],
+    'gallery download' => ['midmeds-asset-generation.gallery.download'],
 ]);
 
 test('a member can open midmeds asset generation', function () {
@@ -34,7 +37,14 @@ test('a member can open midmeds asset generation', function () {
         ->assertSee('Generate product assets for the MidMeds shop.')
         ->assertSee('Combo image')
         ->assertSee('Search the MidMeds catalogue and pick the products in an offer. ChatGPT groups their photos into one PNG with a transparent background, ready for the website or an email.')
-        ->assertSee('Shadow or reflection');
+        ->assertSee('Shadow')
+        ->assertSee('Reflection')
+        ->assertSee('Horizontal padding')
+        ->assertSee('Vertical padding')
+        ->assertSee('10% each side')
+        ->assertSee('10% top and bottom')
+        ->assertSee('Gallery')
+        ->assertSee('Images you download are kept here.');
 
     $this->get(route('dashboard'))
         ->assertOk()
@@ -216,6 +226,7 @@ test('creating a combo image sends the catalogue photos to chatgpt and can be do
             && ($body['output_format'] ?? null) === 'png'
             && str_contains((string) ($body['prompt'] ?? ''), 'fully transparent background')
             && str_contains((string) ($body['prompt'] ?? ''), 'Do not draw a floor, backdrop, shadow, or reflection.')
+            && ! str_contains((string) ($body['prompt'] ?? ''), 'Leave 10%')
             && str_contains((string) ($body['prompt'] ?? ''), 'Image 1 is the photo of "Apron" (SKU APR-1).')
             && str_contains((string) ($body['prompt'] ?? ''), 'Image 2 is the photo of "Nitrile Gloves" (SKU GLV-1).')
             && ($body['images'][0]['image_url'] ?? null) === 'data:image/png;base64,'.comboSourceImage()
@@ -237,9 +248,81 @@ test('creating a combo image sends the catalogue photos to chatgpt and can be do
     expect($replacement)->toBeUuid()->not->toBe($image);
     Storage::disk('local')->assertMissing('combo-images/'.$image.'.png');
     Storage::disk('local')->assertExists('combo-images/'.$replacement.'.png');
+    expect(ComboImage::query()->count())->toBe(0);
 });
 
-test('a ticked shadow checkbox asks for a shadow and reflection', function () {
+test('downloading a combo image keeps one copy in the gallery', function () {
+    Storage::fake('local');
+
+    $user = User::factory()->create();
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    AiModel::factory()->create();
+
+    Http::preventStrayRequests();
+    Http::fake(fn (Request $request) => comboCatalogueResponse($request));
+
+    $component = Livewire::actingAs($user)
+        ->test('pages::midmeds-asset-generation')
+        ->set('selected', [
+            ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
+            ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
+        ])
+        ->call('create');
+
+    $image = $component->get('image');
+
+    $component
+        ->call('downloadCurrent')
+        ->assertHasNoErrors()
+        ->assertSee('Gallery')
+        ->assertDontSee('Images you download are kept here.')
+        ->assertSee($user->name);
+
+    $saved = ComboImage::query()->sole();
+
+    expect($saved->source)->toBe($image)
+        ->and($saved->user_id)->toBe($user->id);
+    Storage::disk('local')->assertExists('combo-gallery/'.$saved->uuid.'.png');
+
+    $component->call('downloadCurrent');
+
+    expect(ComboImage::query()->count())->toBe(1);
+
+    $this->actingAs($user)
+        ->get(route('midmeds-asset-generation.gallery', $saved))
+        ->assertOk()
+        ->assertHeader('content-type', 'image/png');
+
+    $this->actingAs($user)
+        ->get(route('midmeds-asset-generation.gallery.download', $saved))
+        ->assertOk()
+        ->assertDownload('midmeds-combo-image.png');
+});
+
+test('a combo image without a file is not added to the gallery', function () {
+    Storage::fake('local');
+
+    $user = User::factory()->create();
+
+    Livewire::actingAs($user)
+        ->test('pages::midmeds-asset-generation')
+        ->set('image', '6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+        ->call('downloadCurrent')
+        ->assertSee('That combo image could not be saved.');
+
+    expect(ComboImage::query()->count())->toBe(0);
+});
+
+test('a missing gallery file is not shown', function () {
+    $user = User::factory()->create();
+    $saved = ComboImage::factory()->for($user)->create();
+
+    $this->actingAs($user)
+        ->get(route('midmeds-asset-generation.gallery', $saved))
+        ->assertNotFound();
+});
+
+test('the image can use a shadow or a reflection with separate padding', function (string $effect, string $horizontal, string $vertical, string $includes, array $excludes, string $padding) {
     $this->actingAs(User::factory()->create());
     OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
     AiModel::factory()->create();
@@ -248,7 +331,9 @@ test('a ticked shadow checkbox asks for a shadow and reflection', function () {
     Http::fake(fn (Request $request) => comboCatalogueResponse($request));
 
     Livewire::test('pages::midmeds-asset-generation')
-        ->set('shadowOrReflection', true)
+        ->set('effect', $effect)
+        ->set('horizontalPadding', $horizontal)
+        ->set('verticalPadding', $vertical)
         ->set('selected', [
             ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
             ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
@@ -256,19 +341,51 @@ test('a ticked shadow checkbox asks for a shadow and reflection', function () {
         ->call('create')
         ->assertSet('notice', null);
 
-    Http::assertSent(function (Request $request): bool {
+    Http::assertSent(function (Request $request) use ($includes, $excludes, $padding): bool {
         if ($request->url() !== 'https://api.openai.com/v1/images/edits') {
             return false;
         }
 
         $prompt = (string) ($request->data()['prompt'] ?? '');
 
-        return str_contains($prompt, 'soft contact shadow and a faint reflection')
+        foreach ($excludes as $excluded) {
+            if (str_contains($prompt, $excluded)) {
+                return false;
+            }
+        }
+
+        return str_contains($prompt, $includes)
+            && str_contains($prompt, $padding)
             && str_contains($prompt, 'fully transparent background')
             && ($request->data()['background'] ?? null) === 'transparent'
             && ($request->data()['output_format'] ?? null) === 'png';
     });
-});
+})->with([
+    'shadow and horizontal padding' => [
+        'shadow',
+        '10',
+        '0',
+        'Add a soft contact shadow directly beneath the products. Do not add a reflection',
+        ['faint reflection', 'Leave 10% of the image height'],
+        'Leave 10% of the image width completely empty on the left and 10% completely empty on the right.',
+    ],
+    'reflection and vertical padding' => [
+        'reflection',
+        '0',
+        '10',
+        'Add a faint reflection directly beneath the products, as if they are resting on clear glass. Do not add a shadow',
+        ['soft contact shadow', 'Leave 10% of the image width'],
+        'Leave 10% of the image height completely empty at the top and 10% completely empty at the bottom.',
+    ],
+    'an unknown effect or padding is ignored' => [
+        'both',
+        '40',
+        '40',
+        'Do not draw a floor, backdrop, shadow, or reflection.',
+        ['Leave ', 'soft contact shadow', 'faint reflection'],
+        'fully transparent background',
+    ],
+]);
 
 test('a missing combo image is not found', function () {
     $this->actingAs(User::factory()->create());

@@ -1,14 +1,23 @@
 <?php
 
 use App\Actions\CreateComboImage;
+use App\Actions\SaveComboImageToGallery;
+use App\Models\ComboImage;
 use App\Models\OdooConnection;
+use App\Models\User;
 use App\Services\MidMedsProductSearch;
 use App\Services\OdooClient;
 use Flux\Flux;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Js;
+use Illuminate\Support\Str;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 new #[Title('MidMeds Asset Generation')] class extends Component {
+    use WithPagination;
     public string $query = '';
 
     public bool $searched = false;
@@ -17,7 +26,11 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
 
     public ?string $image = null;
 
-    public bool $shadowOrReflection = false;
+    public string $effect = 'none';
+
+    public string $horizontalPadding = '0';
+
+    public string $verticalPadding = '0';
 
     /**
      * @var array<int, array{id: int, name: string, sku: string, image: string}>
@@ -138,7 +151,13 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
         }
 
         try {
-            $this->image = $combo->handle(array_values(array_unique($ids)), $this->image, $this->shadowOrReflection);
+            $this->image = $combo->handle(
+                array_values(array_unique($ids)),
+                $this->image,
+                $this->effect,
+                (int) $this->horizontalPadding,
+                (int) $this->verticalPadding,
+            );
         } catch (\RuntimeException $exception) {
             $this->notice = $exception->getMessage();
             Flux::toast(variant: 'danger', text: $this->notice);
@@ -147,6 +166,40 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
         }
 
         Flux::toast(variant: 'success', text: 'Combo image ready.');
+    }
+
+    /**
+     * Save the current image to the gallery and download it.
+     */
+    public function downloadCurrent(SaveComboImageToGallery $gallery): void
+    {
+        $user = auth()->user();
+
+        if (! $user instanceof User || ! is_string($this->image) || ! Str::isUuid($this->image)) {
+            return;
+        }
+
+        try {
+            $saved = $gallery->remember($this->image, $user);
+        } catch (\RuntimeException $exception) {
+            $this->notice = $exception->getMessage();
+            Flux::toast(variant: 'danger', text: $this->notice);
+
+            return;
+        }
+
+        unset($this->gallery);
+
+        $this->js('window.location.href = '.Js::from(route('midmeds-asset-generation.gallery.download', $saved)));
+    }
+
+    /**
+     * @return LengthAwarePaginator<int, ComboImage>
+     */
+    #[Computed]
+    public function gallery(): LengthAwarePaginator
+    {
+        return ComboImage::query()->with('user')->latest()->paginate(12, pageName: 'gallery');
     }
 };
 ?>
@@ -261,7 +314,7 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
                 @endforeach
             </div>
 
-            <div class="flex flex-wrap items-center gap-3">
+            <div class="flex flex-wrap items-end gap-3">
                 <flux:button
                     type="button"
                     variant="primary"
@@ -276,7 +329,23 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
                     <span wire:loading wire:target="create">{{ __('Creating the combo image…') }}</span>
                 </flux:button>
 
-                <flux:checkbox wire:model="shadowOrReflection" :label="__('Shadow or reflection')" data-test="combo-shadow" />
+                <flux:radio.group wire:model="effect" variant="segmented" data-test="combo-effect">
+                    <flux:radio value="none" :label="__('None')" />
+                    <flux:radio value="shadow" :label="__('Shadow')" />
+                    <flux:radio value="reflection" :label="__('Reflection')" />
+                </flux:radio.group>
+
+                <flux:select wire:model="horizontalPadding" :label="__('Horizontal padding')" class="w-44" data-test="horizontal-padding">
+                    @foreach (\App\Actions\CreateComboImage::PADDING as $padding)
+                        <flux:select.option value="{{ $padding }}">{{ $padding === 0 ? __('None') : __(':percent% each side', ['percent' => $padding]) }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+
+                <flux:select wire:model="verticalPadding" :label="__('Vertical padding')" class="w-48" data-test="vertical-padding">
+                    @foreach (\App\Actions\CreateComboImage::PADDING as $padding)
+                        <flux:select.option value="{{ $padding }}">{{ $padding === 0 ? __('None') : __(':percent% top and bottom', ['percent' => $padding]) }}</flux:select.option>
+                    @endforeach
+                </flux:select>
 
                 <flux:text wire:loading wire:target="create">{{ __('This can take a minute.') }}</flux:text>
             </div>
@@ -296,7 +365,7 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
                     </div>
 
                     <div>
-                        <flux:button :href="route('midmeds-asset-generation.image.download', $image)" icon="arrow-down-tray" data-test="download-combo-image">
+                        <flux:button type="button" wire:click="downloadCurrent" icon="arrow-down-tray" data-test="download-combo-image">
                             {{ __('Download image') }}
                         </flux:button>
                     </div>
@@ -304,4 +373,45 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
             @endif
         </section>
     </div>
+
+    <section class="flex flex-col gap-3">
+        <flux:heading size="lg">{{ __('Gallery') }}</flux:heading>
+
+        @if ($this->gallery->isEmpty())
+            <flux:text>{{ __('Images you download are kept here.') }}</flux:text>
+        @else
+            <div class="grid gap-4" style="grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));">
+                @foreach ($this->gallery as $saved)
+                    <div wire:key="combo-gallery-{{ $saved->id }}" class="flex flex-col gap-2">
+                        <div
+                            class="overflow-hidden rounded-xl border border-zinc-200 p-3 dark:border-zinc-700"
+                            style="background-color: #ffffff; background-image: linear-gradient(45deg, #d4d4d8 25%, transparent 25%), linear-gradient(-45deg, #d4d4d8 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d4d4d8 75%), linear-gradient(-45deg, transparent 75%, #d4d4d8 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0;"
+                        >
+                            <img
+                                src="{{ route('midmeds-asset-generation.gallery', $saved) }}"
+                                alt="{{ __('Saved combo image') }}"
+                                class="mx-auto w-full object-contain"
+                                style="height: 10rem;"
+                            />
+                        </div>
+
+                        <flux:text size="sm">
+                            {{ $saved->created_at?->timezone(config('app.timezone'))->format('j M Y, H:i') }}
+                            @if ($saved->user !== null)
+                                · {{ $saved->user->name }}
+                            @endif
+                        </flux:text>
+
+                        <div>
+                            <flux:button size="sm" :href="route('midmeds-asset-generation.gallery.download', $saved)" icon="arrow-down-tray">
+                                {{ __('Download') }}
+                            </flux:button>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+
+            {{ $this->gallery->links() }}
+        @endif
+    </section>
 </div>

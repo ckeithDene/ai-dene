@@ -3,6 +3,7 @@
 use App\Enums\PageAccess;
 use App\Http\Controllers\BiggestFishLogoController;
 use App\Http\Controllers\ComboImageController;
+use App\Http\Controllers\ComboImageGalleryController;
 use App\Http\Controllers\FirstOrderDiamondLogoController;
 use App\Http\Controllers\GoogleShoppingFeedController;
 use App\Http\Controllers\WarehouseLabAssetController;
@@ -43,6 +44,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('midmeds-asset-generation/images/{image}/download', [ComboImageController::class, 'download'])
             ->whereUuid('image')
             ->name('midmeds-asset-generation.image.download');
+        Route::get('midmeds-asset-generation/gallery/{image}', [ComboImageGalleryController::class, 'show'])
+            ->whereUuid('image')
+            ->name('midmeds-asset-generation.gallery');
+        Route::get('midmeds-asset-generation/gallery/{image}/download', [ComboImageGalleryController::class, 'download'])
+            ->whereUuid('image')
+            ->name('midmeds-asset-generation.gallery.download');
     });
 
     Route::middleware('page:'.PageAccess::PrimaryCareSpaces->value)->group(function () {
