@@ -2,6 +2,7 @@
 
 use App\Enums\PageAccess;
 use App\Http\Controllers\BiggestFishLogoController;
+use App\Http\Controllers\ComboImageController;
 use App\Http\Controllers\FirstOrderDiamondLogoController;
 use App\Http\Controllers\GoogleShoppingFeedController;
 use App\Http\Controllers\WarehouseLabAssetController;
@@ -34,9 +35,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('google-shopping-feed', GoogleShoppingFeedController::class)->name('google-shopping-feed');
     });
 
-    Route::livewire('midmeds-asset-generation', 'pages::midmeds-asset-generation')
-        ->middleware('page:'.PageAccess::MidMedsAssetGeneration->value)
-        ->name('midmeds-asset-generation');
+    Route::middleware('page:'.PageAccess::MidMedsAssetGeneration->value)->group(function () {
+        Route::livewire('midmeds-asset-generation', 'pages::midmeds-asset-generation')->name('midmeds-asset-generation');
+        Route::get('midmeds-asset-generation/images/{image}', [ComboImageController::class, 'show'])
+            ->whereUuid('image')
+            ->name('midmeds-asset-generation.image');
+        Route::get('midmeds-asset-generation/images/{image}/download', [ComboImageController::class, 'download'])
+            ->whereUuid('image')
+            ->name('midmeds-asset-generation.image.download');
+    });
 
     Route::middleware('page:'.PageAccess::PrimaryCareSpaces->value)->group(function () {
         Route::livewire('primary-care-spaces', 'pages::primary-care-spaces')->name('primary-care-spaces');

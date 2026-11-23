@@ -21,6 +21,8 @@ test('a member without a page cannot open it', function (string $name, array $pa
     'google shopping suggestions' => ['google-shopping-suggestions', []],
     'google shopping feed' => ['google-shopping-feed', []],
     'midmeds asset generation' => ['midmeds-asset-generation', []],
+    'a midmeds combo image' => ['midmeds-asset-generation.image', ['image' => '6ba7b810-9dad-11d1-80b4-00c04fd430c8']],
+    'a midmeds combo image download' => ['midmeds-asset-generation.image.download', ['image' => '6ba7b810-9dad-11d1-80b4-00c04fd430c8']],
     'primary care spaces' => ['primary-care-spaces', []],
     'a primary care project' => ['primary-care-spaces.show', ['lead' => 1]],
     'nhs purchasing patterns' => ['nhs-purchasing-patterns', []],
