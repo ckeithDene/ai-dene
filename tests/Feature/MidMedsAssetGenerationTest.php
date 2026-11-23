@@ -33,7 +33,8 @@ test('a member can open midmeds asset generation', function () {
         ->assertSee('MidMeds Asset Generation')
         ->assertSee('Generate product assets for the MidMeds shop.')
         ->assertSee('Combo image')
-        ->assertSee('Search the MidMeds catalogue and pick the products in an offer.');
+        ->assertSee('Search the MidMeds catalogue and pick the products in an offer. ChatGPT groups their photos into one PNG with a transparent background, ready for the website or an email.')
+        ->assertSee('Shadow or reflection');
 
     $this->get(route('dashboard'))
         ->assertOk()
@@ -211,8 +212,10 @@ test('creating a combo image sends the catalogue photos to chatgpt and can be do
             && ($body['model'] ?? null) === 'gpt-image-2.6-sunburst'
             && ($body['size'] ?? null) === '1536x1024'
             && ($body['quality'] ?? null) === 'high'
-            && ($body['background'] ?? null) === 'opaque'
+            && ($body['background'] ?? null) === 'transparent'
             && ($body['output_format'] ?? null) === 'png'
+            && str_contains((string) ($body['prompt'] ?? ''), 'fully transparent background')
+            && str_contains((string) ($body['prompt'] ?? ''), 'Do not draw a floor, backdrop, shadow, or reflection.')
             && str_contains((string) ($body['prompt'] ?? ''), 'Image 1 is the photo of "Apron" (SKU APR-1).')
             && str_contains((string) ($body['prompt'] ?? ''), 'Image 2 is the photo of "Nitrile Gloves" (SKU GLV-1).')
             && ($body['images'][0]['image_url'] ?? null) === 'data:image/png;base64,'.comboSourceImage()
@@ -234,6 +237,37 @@ test('creating a combo image sends the catalogue photos to chatgpt and can be do
     expect($replacement)->toBeUuid()->not->toBe($image);
     Storage::disk('local')->assertMissing('combo-images/'.$image.'.png');
     Storage::disk('local')->assertExists('combo-images/'.$replacement.'.png');
+});
+
+test('a ticked shadow checkbox asks for a shadow and reflection', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    AiModel::factory()->create();
+    Storage::fake('local');
+    Http::preventStrayRequests();
+    Http::fake(fn (Request $request) => comboCatalogueResponse($request));
+
+    Livewire::test('pages::midmeds-asset-generation')
+        ->set('shadowOrReflection', true)
+        ->set('selected', [
+            ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
+            ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
+        ])
+        ->call('create')
+        ->assertSet('notice', null);
+
+    Http::assertSent(function (Request $request): bool {
+        if ($request->url() !== 'https://api.openai.com/v1/images/edits') {
+            return false;
+        }
+
+        $prompt = (string) ($request->data()['prompt'] ?? '');
+
+        return str_contains($prompt, 'soft contact shadow and a faint reflection')
+            && str_contains($prompt, 'fully transparent background')
+            && ($request->data()['background'] ?? null) === 'transparent'
+            && ($request->data()['output_format'] ?? null) === 'png';
+    });
 });
 
 test('a missing combo image is not found', function () {

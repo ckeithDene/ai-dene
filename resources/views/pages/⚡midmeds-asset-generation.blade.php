@@ -17,6 +17,8 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
 
     public ?string $image = null;
 
+    public bool $shadowOrReflection = false;
+
     /**
      * @var array<int, array{id: int, name: string, sku: string, image: string}>
      */
@@ -136,7 +138,7 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
         }
 
         try {
-            $this->image = $combo->handle(array_values(array_unique($ids)), $this->image);
+            $this->image = $combo->handle(array_values(array_unique($ids)), $this->image, $this->shadowOrReflection);
         } catch (\RuntimeException $exception) {
             $this->notice = $exception->getMessage();
             Flux::toast(variant: 'danger', text: $this->notice);
@@ -157,7 +159,7 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
 
     <div class="flex max-w-3xl flex-col gap-2">
         <flux:heading size="lg">{{ __('Combo image') }}</flux:heading>
-        <flux:text>{{ __('Search the MidMeds catalogue and pick the products in an offer. ChatGPT groups their photos into one image on a black background, ready for the website or an email.') }}</flux:text>
+        <flux:text>{{ __('Search the MidMeds catalogue and pick the products in an offer. ChatGPT groups their photos into one PNG with a transparent background, ready for the website or an email.') }}</flux:text>
     </div>
 
     <form wire:submit="search" class="flex max-w-3xl items-end gap-3">
@@ -274,12 +276,17 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
                     <span wire:loading wire:target="create">{{ __('Creating the combo image…') }}</span>
                 </flux:button>
 
+                <flux:checkbox wire:model="shadowOrReflection" :label="__('Shadow or reflection')" data-test="combo-shadow" />
+
                 <flux:text wire:loading wire:target="create">{{ __('This can take a minute.') }}</flux:text>
             </div>
 
             @if ($image)
                 <div class="flex flex-col gap-3">
-                    <div class="overflow-hidden rounded-xl bg-black p-4">
+                    <div
+                        class="overflow-hidden rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
+                        style="background-color: #ffffff; background-image: linear-gradient(45deg, #d4d4d8 25%, transparent 25%), linear-gradient(-45deg, #d4d4d8 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #d4d4d8 75%), linear-gradient(-45deg, transparent 75%, #d4d4d8 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0;"
+                    >
                         <img
                             src="{{ route('midmeds-asset-generation.image', $image) }}"
                             alt="{{ __('Combo image') }}"
