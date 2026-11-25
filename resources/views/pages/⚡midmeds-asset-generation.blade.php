@@ -32,6 +32,16 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
 
     public string $verticalPadding = '0';
 
+    public bool $logo = false;
+
+    public string $logoCorner = 'top-left';
+
+    public string $badgeText = '';
+
+    public string $badgeStyle = 'none';
+
+    public string $extraPrompt = '';
+
     /**
      * @var array<int, array{id: int, name: string, sku: string, image: string}>
      */
@@ -150,6 +160,14 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
             }
         }
 
+        $this->validate([
+            'badgeText' => ['nullable', 'string', 'max:40'],
+            'extraPrompt' => ['nullable', 'string', 'max:500'],
+        ], [
+            'badgeText.max' => 'Badge text can be up to 40 characters.',
+            'extraPrompt.max' => 'Extra prompt can be up to 500 characters.',
+        ]);
+
         try {
             $this->image = $combo->handle(
                 array_values(array_unique($ids)),
@@ -157,6 +175,11 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
                 $this->effect,
                 (int) $this->horizontalPadding,
                 (int) $this->verticalPadding,
+                $this->logo,
+                $this->logoCorner,
+                $this->badgeText,
+                $this->badgeStyle,
+                $this->extraPrompt,
             );
         } catch (\RuntimeException $exception) {
             $this->notice = $exception->getMessage();
@@ -349,6 +372,34 @@ new #[Title('MidMeds Asset Generation')] class extends Component {
 
                 <flux:text wire:loading wire:target="create">{{ __('This can take a minute.') }}</flux:text>
             </div>
+
+            <div class="flex flex-wrap items-end gap-3">
+                <flux:checkbox wire:model.live="logo" :label="__('MidMeds logo')" data-test="combo-logo" />
+
+                @if ($logo)
+                    <flux:select wire:model="logoCorner" :label="__('Logo corner')" class="w-44" data-test="logo-corner">
+                        @foreach (\App\Actions\CreateComboImage::LOGO_CORNERS as $corner => $label)
+                            <flux:select.option value="{{ $corner }}">{{ __($label) }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                @endif
+
+                <flux:input wire:model="badgeText" :label="__('Badge text')" placeholder="3 for 2" class="w-44" data-test="badge-text" />
+
+                <flux:select wire:model="badgeStyle" :label="__('Badge style')" class="w-44" data-test="badge-style">
+                    @foreach (\App\Actions\CreateComboImage::BADGE_STYLES as $style => $label)
+                        <flux:select.option value="{{ $style }}">{{ __($label) }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
+
+            <flux:textarea
+                wire:model="extraPrompt"
+                :label="__('Extra prompt')"
+                :description="__('Optional. Anything else you want added or changed in this image.')"
+                rows="3"
+                data-test="extra-prompt"
+            />
 
             @if ($image)
                 <div class="flex flex-col gap-3">

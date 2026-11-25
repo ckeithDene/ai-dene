@@ -26,6 +26,31 @@ class CreateComboImage
     public const array PADDING = [0, 5, 10, 15, 20];
 
     /**
+     * Where the MidMeds logo can sit.
+     *
+     * @var array<string, string>
+     */
+    public const array LOGO_CORNERS = [
+        'top-left' => 'Top left',
+        'top-right' => 'Top right',
+        'bottom-left' => 'Bottom left',
+        'bottom-right' => 'Bottom right',
+    ];
+
+    /**
+     * Offer-badge shapes. None means the badge is left off.
+     *
+     * @var array<string, string>
+     */
+    public const array BADGE_STYLES = [
+        'none' => 'None',
+        'round' => 'Round',
+        'square' => 'Square',
+        'grunge' => 'Grunge',
+        'explosion' => 'Explosion',
+    ];
+
+    /**
      * The saved ChatGPT model is for text research. Combo images use the
      * current GPT image model with that same API key. gpt-image-1 was shut
      * down on 23 October 2026.
@@ -42,8 +67,18 @@ class CreateComboImage
      *
      * @param  array<int, int>  $ids
      */
-    public function handle(array $ids, ?string $replace = null, string $effect = 'none', int $horizontalPadding = 0, int $verticalPadding = 0): string
-    {
+    public function handle(
+        array $ids,
+        ?string $replace = null,
+        string $effect = 'none',
+        int $horizontalPadding = 0,
+        int $verticalPadding = 0,
+        bool $logo = false,
+        string $logoCorner = 'top-left',
+        string $badgeText = '',
+        string $badgeStyle = 'none',
+        string $extraPrompt = '',
+    ): string {
         set_time_limit(210);
 
         $ids = array_values(array_unique(array_filter(
@@ -81,7 +116,18 @@ class CreateComboImage
             }
         }
 
-        $binary = $this->generate($aiModel, $photos, $effect, $horizontalPadding, $verticalPadding);
+        $binary = $this->generate(
+            $aiModel,
+            $photos,
+            $effect,
+            $horizontalPadding,
+            $verticalPadding,
+            $logo,
+            $logoCorner,
+            $badgeText,
+            $badgeStyle,
+            $extraPrompt,
+        );
         $image = (string) Str::uuid();
         $stored = Storage::disk('local')->put($this->path($image), $binary);
 
@@ -98,8 +144,18 @@ class CreateComboImage
     /**
      * @param  array<int, array{id: int, name: string, sku: string, image: string}>  $photos
      */
-    private function generate(AiModel $aiModel, array $photos, string $effect, int $horizontalPadding, int $verticalPadding): string
-    {
+    private function generate(
+        AiModel $aiModel,
+        array $photos,
+        string $effect,
+        int $horizontalPadding,
+        int $verticalPadding,
+        bool $logo,
+        string $logoCorner,
+        string $badgeText,
+        string $badgeStyle,
+        string $extraPrompt,
+    ): string {
         $request = Http::connectTimeout(10)
             ->timeout(180)
             ->withoutRedirecting()
@@ -114,13 +170,19 @@ class CreateComboImage
         }
 
         try {
+            $images = array_map(
+                fn (array $photo): array => ['image_url' => $photo['image']],
+                $photos,
+            );
+
+            if ($logo) {
+                $images[] = ['image_url' => $this->logoDataUrl()];
+            }
+
             $response = $request->post('https://api.openai.com/v1/images/edits', [
                 'model' => self::MODEL,
-                'prompt' => $this->prompt($photos, $effect, $horizontalPadding, $verticalPadding),
-                'images' => array_map(
-                    fn (array $photo): array => ['image_url' => $photo['image']],
-                    $photos,
-                ),
+                'prompt' => $this->prompt($photos, $effect, $horizontalPadding, $verticalPadding, $logo, $logoCorner, $badgeText, $badgeStyle, $extraPrompt),
+                'images' => $images,
                 'size' => '1536x1024',
                 'quality' => 'high',
                 'background' => 'transparent',
@@ -151,11 +213,23 @@ class CreateComboImage
     /**
      * @param  array<int, array{id: int, name: string, sku: string, image: string}>  $photos
      */
-    private function prompt(array $photos, string $effect, int $horizontalPadding, int $verticalPadding): string
-    {
+    private function prompt(
+        array $photos,
+        string $effect,
+        int $horizontalPadding,
+        int $verticalPadding,
+        bool $logo,
+        string $logoCorner,
+        string $badgeText,
+        string $badgeStyle,
+        string $extraPrompt,
+    ): string {
         $effect = $this->effect($effect);
         $horizontalPadding = $this->padding($horizontalPadding);
         $verticalPadding = $this->padding($verticalPadding);
+        $logoCorner = $this->corner($logoCorner);
+        $badge = $this->badge($badgeText, $badgeStyle);
+        $extraPrompt = $this->extra($extraPrompt);
         $ground = match ($effect) {
             'shadow' => 'Add a soft contact shadow directly beneath the products. Do not add a reflection, floor, or coloured backdrop. Every pixel that is not part of a product or its shadow must stay fully transparent.',
             'reflection' => 'Add a faint reflection directly beneath the products, as if they are resting on clear glass. Do not add a shadow, floor, or coloured backdrop. Every pixel that is not part of a product or its reflection must stay fully transparent.',
@@ -168,7 +242,7 @@ class CreateComboImage
             'Arrange all of the supplied products into one tight, balanced group on a fully transparent background. Larger packs sit toward the back and smaller items sit in front. Products may overlap a little, and every product must remain recognizable. Use soft studio lighting. '.$ground,
         ];
 
-        $margin = $this->margin($horizontalPadding, $verticalPadding);
+        $margin = $this->margin($horizontalPadding, $verticalPadding, $logo, $badge !== null);
 
         if ($margin !== '') {
             $lines[] = $margin;
@@ -186,7 +260,25 @@ class CreateComboImage
             $lines[] = $line.'.';
         }
 
-        $lines[] = 'Keep each product\'s packaging, colours, logos, and shape exactly as shown in its photo. Do not invent text, prices, watermarks, people, props, or any product that was not supplied. The finished file must be a PNG with a transparent background.';
+        if ($logo) {
+            $lines[] = 'Image '.(count($photos) + 1).' is the MidMeds logo, not a product. Place that logo, unchanged, in the '.$this->cornerPhrase($logoCorner).' corner. Keep a small gap from the edges, make it about 18% of the image width, and do not let it cover a product. Do not redraw, recolour, or retype it, and do not put a black or white box behind it.';
+        }
+
+        if ($badge !== null) {
+            $lines[] = $this->badgeSentence($badge['text'], $badge['style'], $logo ? $this->opposite($logoCorner) : 'top-right');
+        }
+
+        $closing = $badge === null
+            ? 'Do not invent text, prices, watermarks, people, props, or any product that was not supplied.'
+            : 'Do not invent text other than the badge wording, and do not invent prices, watermarks, people, props, or any product that was not supplied.';
+
+        $lines[] = 'Keep each product\'s packaging, colours, logos, and shape exactly as shown in its photo. '.$closing.' The finished file must be a PNG with a transparent background.';
+
+        if ($extraPrompt !== '') {
+            $lines[] = 'The user also asked: '.$extraPrompt.'. Follow that request. Keep the supplied products recognizable and keep the background transparent.'
+                .($logo ? ' Leave the MidMeds logo as supplied.' : '')
+                .($badge !== null ? ' Leave the badge wording unchanged.' : '');
+        }
 
         return implode("\n", $lines);
     }
@@ -201,10 +293,81 @@ class CreateComboImage
         return in_array($padding, self::PADDING, true) ? $padding : 0;
     }
 
+    private function corner(string $corner): string
+    {
+        return array_key_exists($corner, self::LOGO_CORNERS) ? $corner : 'top-left';
+    }
+
+    private function cornerPhrase(string $corner): string
+    {
+        return match ($corner) {
+            'top-right' => 'top right',
+            'bottom-left' => 'bottom left',
+            'bottom-right' => 'bottom right',
+            default => 'top left',
+        };
+    }
+
+    private function opposite(string $corner): string
+    {
+        return match ($corner) {
+            'top-left' => 'bottom-right',
+            'top-right' => 'bottom-left',
+            'bottom-left' => 'top-right',
+            default => 'top-left',
+        };
+    }
+
+    /**
+     * @return array{text: string, style: string}|null
+     */
+    private function badge(string $text, string $style): ?array
+    {
+        $text = trim(preg_replace('/\s+/', ' ', str_replace(['"', "\r", "\n"], ["'", ' ', ' '], strip_tags($text))) ?? '');
+        $text = mb_substr($text, 0, 40);
+
+        if ($text === '' || ! array_key_exists($style, self::BADGE_STYLES) || $style === 'none') {
+            return null;
+        }
+
+        return ['text' => $text, 'style' => $style];
+    }
+
+    private function badgeSentence(string $text, string $style, string $corner): string
+    {
+        $shape = match ($style) {
+            'square' => 'The badge is a clean square with slightly rounded corners.',
+            'grunge' => 'The badge looks like a worn rubber stamp, with rough edges and a lightly distressed fill. Keep the wording readable.',
+            'explosion' => 'The badge is a sharp starburst, like a retail offer explosion. Keep the wording readable in the centre.',
+            default => 'The badge is a clean circle.',
+        };
+
+        return 'Add one offer badge in the '.$this->cornerPhrase($corner).' corner. The badge wording is exactly "'.$text.'" and nothing else. Set that wording in bold Open Sans. If that font is unavailable, use a bold geometric sans-serif that looks like Open Sans. Style the badge in the MidMeds blues: a deep blue (#3060A8) shape, a mid blue (#5080B8) edge, and a light blue (#A3DAF6) highlight, with white lettering. '.$shape.' Do not add a box or backdrop behind the badge.';
+    }
+
+    private function extra(string $prompt): string
+    {
+        $prompt = trim(preg_replace('/\s+/', ' ', strip_tags($prompt)) ?? '');
+
+        return mb_substr($prompt, 0, 500);
+    }
+
+    private function logoDataUrl(): string
+    {
+        $path = resource_path('images/midmeds-logo.png');
+        $binary = is_file($path) ? file_get_contents($path) : false;
+
+        if (! is_string($binary) || ! str_starts_with($binary, "\x89PNG\r\n\x1a\n")) {
+            throw new RuntimeException('The MidMeds logo file is missing.');
+        }
+
+        return 'data:image/png;base64,'.base64_encode($binary);
+    }
+
     /**
      * Describe an empty transparent margin without changing the canvas size.
      */
-    private function margin(int $horizontalPadding, int $verticalPadding): string
+    private function margin(int $horizontalPadding, int $verticalPadding, bool $logo = false, bool $badge = false): string
     {
         if ($horizontalPadding === 0 && $verticalPadding === 0) {
             return '';
@@ -220,7 +383,17 @@ class CreateComboImage
             $lines[] = 'Leave '.$verticalPadding.'% of the image height completely empty at the top and '.$verticalPadding.'% completely empty at the bottom.';
         }
 
-        $lines[] = 'The empty margin must stay fully transparent and must not contain products, text, a floor, or a backdrop.';
+        $allowed = array_values(array_filter([
+            $logo ? 'the MidMeds logo' : null,
+            $badge ? 'the offer badge' : null,
+        ]));
+
+        if ($allowed === []) {
+            $lines[] = 'The empty margin must stay fully transparent and must not contain products, text, a floor, or a backdrop.';
+        } else {
+            $lines[] = 'The empty margin must stay fully transparent and must not contain products, a floor, or a backdrop.';
+            $lines[] = ucfirst(implode(' and ', $allowed)).' may sit in that empty margin.';
+        }
 
         return implode(' ', $lines);
     }

@@ -43,6 +43,12 @@ test('a member can open midmeds asset generation', function () {
         ->assertSee('Vertical padding')
         ->assertSee('10% each side')
         ->assertSee('10% top and bottom')
+        ->assertSee('MidMeds logo')
+        ->assertSee('Badge text')
+        ->assertSee('Badge style')
+        ->assertSee('Explosion')
+        ->assertSee('Extra prompt')
+        ->assertDontSee('Logo corner')
         ->assertSee('Gallery')
         ->assertSee('Images you download are kept here.');
 
@@ -386,6 +392,106 @@ test('the image can use a shadow or a reflection with separate padding', functio
         'fully transparent background',
     ],
 ]);
+
+test('a combo image can include the logo, a badge, and an extra prompt', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    AiModel::factory()->create();
+    Storage::fake('local');
+    Http::preventStrayRequests();
+    Http::fake(fn (Request $request) => comboCatalogueResponse($request));
+
+    $logo = 'data:image/png;base64,'.base64_encode((string) file_get_contents(resource_path('images/midmeds-logo.png')));
+
+    Livewire::test('pages::midmeds-asset-generation')
+        ->set('logo', true)
+        ->assertSee('Logo corner')
+        ->set('logoCorner', 'bottom-right')
+        ->set('badgeText', "3 for 2\n<script>")
+        ->set('badgeStyle', 'explosion')
+        ->set('extraPrompt', 'Make the gloves a little larger.')
+        ->set('horizontalPadding', '10')
+        ->set('selected', [
+            ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
+            ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
+        ])
+        ->call('create')
+        ->assertSet('notice', null);
+
+    Http::assertSent(function (Request $request) use ($logo): bool {
+        if ($request->url() !== 'https://api.openai.com/v1/images/edits') {
+            return false;
+        }
+
+        $prompt = (string) ($request->data()['prompt'] ?? '');
+        $images = $request->data()['images'] ?? [];
+
+        return str_contains($prompt, 'Image 3 is the MidMeds logo, not a product. Place that logo, unchanged, in the bottom right corner.')
+            && ! str_contains($prompt, '<script>')
+            && str_contains($prompt, 'The badge wording is exactly "3 for 2" and nothing else.')
+            && str_contains($prompt, 'bold Open Sans')
+            && str_contains($prompt, 'sharp starburst')
+            && str_contains($prompt, '#3060A8')
+            && str_contains($prompt, 'Add one offer badge in the top left corner.')
+            && str_contains($prompt, 'The MidMeds logo and the offer badge may sit in that empty margin.')
+            && str_contains($prompt, 'The user also asked: Make the gloves a little larger.')
+            && str_contains($prompt, 'Leave the MidMeds logo as supplied.')
+            && str_contains($prompt, 'Leave the badge wording unchanged.')
+            && ($images[2]['image_url'] ?? null) === $logo
+            && count($images) === 3;
+    });
+});
+
+test('an unknown logo corner falls back and a badge needs a style', function () {
+    $this->actingAs(User::factory()->create());
+    OdooConnection::factory()->create(['url' => 'https://midmeds.odoo.com']);
+    AiModel::factory()->create();
+    Storage::fake('local');
+    Http::preventStrayRequests();
+    Http::fake(fn (Request $request) => comboCatalogueResponse($request));
+
+    Livewire::test('pages::midmeds-asset-generation')
+        ->set('logo', true)
+        ->set('logoCorner', 'middle')
+        ->set('badgeText', '3 for 2')
+        ->set('badgeStyle', 'ribbon')
+        ->set('selected', [
+            ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
+            ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
+        ])
+        ->call('create')
+        ->assertSet('notice', null);
+
+    Http::assertSent(function (Request $request): bool {
+        if ($request->url() !== 'https://api.openai.com/v1/images/edits') {
+            return false;
+        }
+
+        $prompt = (string) ($request->data()['prompt'] ?? '');
+
+        return str_contains($prompt, 'in the top left corner')
+            && ! str_contains($prompt, 'offer badge')
+            && count($request->data()['images'] ?? []) === 3;
+    });
+});
+
+test('a long extra prompt is rejected before chatgpt is called', function () {
+    $this->actingAs(User::factory()->create());
+    Http::preventStrayRequests();
+    Http::fake();
+
+    Livewire::test('pages::midmeds-asset-generation')
+        ->set('extraPrompt', str_repeat('a', 501))
+        ->set('selected', [
+            ['id' => 11, 'name' => 'Apron', 'sku' => 'APR-1', 'image' => ''],
+            ['id' => 10, 'name' => 'Nitrile Gloves', 'sku' => 'GLV-1', 'image' => ''],
+        ])
+        ->call('create')
+        ->assertHasErrors(['extraPrompt' => 'max'])
+        ->assertSee('Extra prompt can be up to 500 characters.');
+
+    Http::assertNothingSent();
+});
 
 test('a missing combo image is not found', function () {
     $this->actingAs(User::factory()->create());
