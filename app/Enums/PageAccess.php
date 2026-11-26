@@ -26,6 +26,21 @@ enum PageAccess: string
     }
 
     /**
+     * Pages a new person can open until an admin changes them.
+     *
+     * @return array<int, string>
+     */
+    public static function memberDefaults(): array
+    {
+        return [
+            self::FirstOrderDiamonds->value,
+            self::BiggestFish->value,
+            self::PrimaryCareSpaces->value,
+            self::NhsPurchasingPatterns->value,
+        ];
+    }
+
+    /**
      * @return array<int, string>
      */
     public static function values(): array

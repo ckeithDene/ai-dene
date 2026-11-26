@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\PageAccess;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\TeamInvitation;
@@ -34,7 +35,7 @@ class JoinTeamFromInvitation
             ]);
 
             $user->email_verified_at = now();
-            $user->allowed_pages = [];
+            $user->allowed_pages = PageAccess::memberDefaults();
             $user->save();
 
             $personalTeam = Team::query()->create([

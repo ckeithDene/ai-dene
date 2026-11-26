@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PageAccess;
 use App\Enums\TeamRole;
 use App\Models\Team;
 use App\Models\TeamInvitation;
@@ -229,7 +230,12 @@ test('a new person can set a password and join from the invitation', function ()
 
     expect($user)->not->toBeNull()
         ->and($user->is_admin)->toBeFalse()
-        ->and($user->allowed_pages)->toBe([])
+        ->and($user->allowed_pages)->toBe([
+            PageAccess::FirstOrderDiamonds->value,
+            PageAccess::BiggestFish->value,
+            PageAccess::PrimaryCareSpaces->value,
+            PageAccess::NhsPurchasingPatterns->value,
+        ])
         ->and($user->current_team_id)->toBe($team->id)
         ->and($user->belongsToTeam($team))->toBeTrue()
         ->and($user->personalTeam())->not->toBeNull()
